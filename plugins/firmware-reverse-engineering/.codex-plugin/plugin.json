@@ -1,6 +1,6 @@
 {
   "name": "firmware-reverse-engineering",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Firmware extraction, static analysis, Ghidra reverse engineering, emulation, and security reporting skills.",
   "author": {
     "name": "Hussein Muhaisen",
