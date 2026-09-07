@@ -8,11 +8,14 @@
     "firmware-emulation/references/network-analysis.md": "85f385ff1361ca788e755b4693d6a5ddb10e7c1ff2574105a34fe5a735930456",
     "firmware-emulation/references/qemu-system.md": "009df6b454842b4efd999f9d2e935f984c3ca1f831b40a55b8388bd2f54c1418",
     "firmware-emulation/references/qemu-user.md": "bdfb62cdc32fbf7736e4c2b142bbf2f0223761f01573a1e66969df36e47c8bb0",
-    "firmware-extraction/SKILL.md": "91ca169cc7383f213826d470623b1a24c392f3d6fc903421272726d269798c9c",
+    "firmware-extraction/SKILL.md": "64b913bd68dfa9ad85ef08e65575a381b1f2f892cd7d6094db9a9f1729247418",
     "firmware-extraction/references/binwalk.md": "3aff20f7d36e3e08eab2106f8bc4c0951b7e9c64dba173d705b74321b1712a35",
     "firmware-extraction/references/encryption.md": "cf67597fa832e1f1f731cef56de34325f58524d4b7b2956cc599c40bba33511d",
     "firmware-extraction/references/filesystems.md": "3e9dd9397ae164be51b61390c3b99c935b0f2852849812e12f6a06dde687e8f2",
+    "firmware-extraction/references/manual-extraction.md": "b0e97c5c4b27586dc3ad960ba5c97b6e0b16b34600684b69f3e9f2748e75773c",
     "firmware-extraction/references/troubleshooting.md": "ab2c51c1ef59190d16f881df2617ba88aa0752ef2da2193b2660e0f1c0c37d9f",
+    "firmware-extraction/references/unblob.md": "fe3ea2a8e30d40307ea9b1ccd115bb4c5b98a2ac05ce2e4296b9123bfdf83153",
+    "firmware-extraction/scripts/summarize_unblob.py": "2644cab82b6d84c0051b9d0c65c8bdfd9279324878abaeb7cff5bdfe40f5b2b1",
     "firmware-security-reports/SKILL.md": "7609b16b9e2e8d6349feccd476db3df3cc558de6bf4797eea14f6c81387c226f",
     "firmware-security-reports/assets/finding_template.md": "f0eec6ef933c3ec4ea031b810a70e8cb98087e0fccef9d556c76909b65e6b3fb",
     "firmware-security-reports/assets/pentest_report_template.md": "65b823627dafa38c6a847c980380c5de592d7799d6f53a0cba8b2e4fa670655a",
@@ -29,5 +32,5 @@
     "ghidra-re/scripts/find_buffer_overflows.py": "aa177460c81714afdccb0212d94c947fe0474e6b7d33eaf99f29b18719b49ce3",
     "ghidra-re/scripts/find_crypto.py": "272e5454d721902805b2ac90889223e32f17ca743beb30cb17c0285577693317"
   },
-  "approval": "Technical corrections and Apache-2.0 licensing explicitly authorized by Hussein Muhaisen on 2026-09-07; see docs/release-readiness.md."
+  "approval": "Technical corrections and Apache-2.0 licensing explicitly authorized by Hussein Muhaisen on 2026-09-07; see docs/release-readiness.md. Unblob-first extraction, report summarization, and the manual-reference move explicitly authorized by Hussein Muhaisen in the follow-up request."
 }
