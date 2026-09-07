@@ -25,7 +25,7 @@ The plugin contains instructions and analysis resources. It does not install ext
 
 | Workflow | External environment needed |
 | --- | --- |
-| Extraction | Binwalk 3.1.0 plus selected external extractors. Development-branch and 2.x flags differ. |
+| Extraction | Unblob 26.6.4 and its relevant external extractors; Python 3 for the bundled JSON summary. Binwalk 3.1.0 and filesystem tools remain available for unresolved cases. |
 | Static analysis | `file`, `strings`, `readelf`, `objdump`, `xxd`, and relevant architecture toolchains. |
 | Ghidra | Ghidra 12.1.3, JDK 21 and the bundled Jython extension. Scripts explicitly select Jython, not the default PyGhidra runtime. |
 | Emulation | Linux with the relevant QEMU targets, GDB, and networking tools. Firmadyne/FirmAE are separate installations. |
@@ -83,6 +83,7 @@ python3 tools/validate_repo.py --release
 python3 -m unittest discover -s tests -v
 python3 tools/check_ghidra_runtime.py --ghidra-home /absolute/path/to/ghidra_12.1.3_PUBLIC
 python3 tools/check_binwalk_runtime.py --binwalk /absolute/path/to/binwalk
+python3 tools/check_unblob_runtime.py --unblob /absolute/path/to/unblob
 ```
 
 The Ghidra test compiles a benign x86-64 ELF, runs all four scripts twice and
@@ -91,6 +92,15 @@ bounded scanning across sparse memory. It requires an explicit success marker
 because headless Ghidra can exit zero after a script exception. The Binwalk test
 checks extraction against exact gzip plaintext, CLI filters, JSON and entropy
 output. Neither test boots vendor firmware or demonstrates exploitability.
+
+The unblob check requires version 26.6.4 and libmagic. It uses the built-in TAR
+extractor, so it does not require every external filesystem extractor. It checks
+nested recovered bytes, padding, source-relative offsets, whole-file and regional
+randomness, disabled randomness, depth limits, and a nested extraction error from
+an existing output directory. The summary helper's unit tests also cover large
+inventories, pagination, malformed reports, multi-file reports and unknown report
+types. These checks do not establish coverage of arbitrary firmware formats or
+measure model token savings.
 
 ## Updates and removal
 

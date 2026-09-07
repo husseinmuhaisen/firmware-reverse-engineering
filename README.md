@@ -10,7 +10,7 @@ The collection packages the existing workflows, references, templates, and Ghidr
 
 | Skill | Purpose |
 | --- | --- |
-| [firmware-extraction](plugins/firmware-reverse-engineering/skills/firmware-extraction/SKILL.md) | Unpack firmware images and embedded filesystems. |
+| [firmware-extraction](plugins/firmware-reverse-engineering/skills/firmware-extraction/SKILL.md) | Extract with unblob, summarize its JSON report, and investigate unresolved regions. |
 | [firmware-static-analysis](plugins/firmware-reverse-engineering/skills/firmware-static-analysis/SKILL.md) | Inspect ELF architecture, metadata, strings, symbols, and binary structure. |
 | [ghidra-re](plugins/firmware-reverse-engineering/skills/ghidra-re/SKILL.md) | Analyze firmware binaries with Ghidra and bundled analysis scripts. |
 | [firmware-emulation](plugins/firmware-reverse-engineering/skills/firmware-emulation/SKILL.md) | Work with QEMU, GDB, network analysis, Firmadyne, and FirmAE. |

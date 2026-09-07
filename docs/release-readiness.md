@@ -14,6 +14,27 @@ The packaging and technical fixes were merged in [PR #1](https://github.com/Orbi
 
 ## Technical fixes
 
+### Unblob extraction follow-up
+
+Hussein explicitly authorized adapting the extraction skill to use unblob first
+and opening a PR. The default entrypoint now invokes unblob 26.6.4, summarizes its
+JSON report with a bundled standard-library Python helper, and routes unresolved
+cases to the existing Binwalk/filesystem workflows. The earlier detailed
+extraction procedures are retained in `references/manual-extraction.md` and loaded
+only when needed. The other four skills are unchanged by this follow-up.
+
+Verification: the real CLI recovers nested TAR fixture bytes, identifies padding
+and unknown regions, preserves source-relative chunk bounds, honors randomness
+and extraction depth, and reports a nested output-directory error. Six summary
+regressions cover out-of-order task results, large inventories, error retention,
+pagination, whole-file randomness, multi-file reports and malformed input. An
+independent agent used the revised skill on a fresh fixture, recovered the nested
+archives, verified payload bytes and offsets, and retained the unknown tail as
+unresolved. This does not claim arbitrary firmware coverage or measured
+model-token savings.
+
+### Earlier corrections
+
 | Area | Corrections |
 | --- | --- |
 | Ghidra scripts | Explicit Jython runtime for 12.1.3; initialized state/imports; proper Java byte arrays; bounded initialized-block scans; both crypto-table byte orders; cancellation checks; repeated call sites; preserved analyst names/comments; idempotent annotations. Supplied the documented auto-rename implementation. |
@@ -51,6 +72,7 @@ lightweight regressions and a checksum-pinned Ghidra integration test. Binwalk's
 runtime test is separately runnable with 3.1.0 installed.
 
 - [Binwalk 3.1.0 CLI](https://github.com/ReFirmLabs/binwalk/blob/v3.1.0/src/cliparser.rs) and [entropy implementation](https://github.com/ReFirmLabs/binwalk/blob/v3.1.0/src/entropy.rs). The development branch has different flags; `-C` is valid in 3.1.0.
+- [Unblob 26.6.4 CLI](https://github.com/onekey-sec/unblob/blob/26.6.4/python/unblob/cli.py), [report types](https://github.com/onekey-sec/unblob/blob/26.6.4/python/unblob/report.py) and [processing](https://github.com/onekey-sec/unblob/blob/26.6.4/python/unblob/processing.py)
 - [Ghidra 12.1.3 release](https://github.com/NationalSecurityAgency/ghidra/releases/tag/Ghidra_12.1.3_build); bundled API documentation and Jython extension examples were used for runtime corrections.
 - [FirmAE mode parser](https://github.com/pr0v3rbs/FirmAE/blob/master/run.sh) and [Firmadyne workflow](https://github.com/firmadyne/firmadyne#usage)
 - [AFL++ QEMU mode](https://github.com/AFLplusplus/AFLplusplus/blob/stable/qemu_mode/README.md)
