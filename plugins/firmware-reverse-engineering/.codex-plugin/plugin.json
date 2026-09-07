@@ -1,0 +1,34 @@
+{
+  "name": "firmware-reverse-engineering",
+  "version": "0.1.0",
+  "description": "Firmware extraction, static analysis, Ghidra reverse engineering, emulation, and security reporting skills.",
+  "author": {
+    "name": "Hussein Muhaisen",
+    "url": "https://github.com/husseinmuhaisen"
+  },
+  "repository": "https://github.com/husseinmuhaisen/firmware-reverse-engineering",
+  "keywords": [
+    "firmware",
+    "reverse-engineering",
+    "ghidra",
+    "qemu",
+    "security"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Firmware Reverse Engineering",
+    "shortDescription": "Firmware extraction, analysis, emulation, and reporting.",
+    "longDescription": "Firmware extraction, static analysis, Ghidra reverse engineering, emulation, and security reporting skills.",
+    "developerName": "Hussein Muhaisen",
+    "category": "Security",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Analyze the structure of this firmware image.",
+      "Inspect an extracted firmware binary in Ghidra.",
+      "Draft a report from my firmware assessment findings."
+    ]
+  }
+}

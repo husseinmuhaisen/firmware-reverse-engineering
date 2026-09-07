@@ -1,0 +1,31 @@
+{
+  "source_commit": "e47b88bc96f2e269f71acfc702c0699f6593581b",
+  "destination_prefix": "plugins/firmware-reverse-engineering/skills/",
+  "files": {
+    "firmware-emulation/SKILL.md": "02ae4611327e58c825bc2d39b03cb9b488d667a674671e3e64bf947e987253f8",
+    "firmware-emulation/references/automated-emulation.md": "d1f8c9b9f2ad8f6ba5d7ba694c32c7dea8bbab0fa95636655a0eb57cab553e0f",
+    "firmware-emulation/references/gdb-debugging.md": "1501661d385ce3147e4960856e7e5b97c42ed016a0f58e7ce54a51c1ea836838",
+    "firmware-emulation/references/network-analysis.md": "0bb8ee485836b6609adbd0229d2e6f29b2470bbfdf5bc1db1d9c1e49b3a28163",
+    "firmware-emulation/references/qemu-system.md": "d936d381125245bc3eca5ead82c8e497c2bc5e1009e2a27f7ae1c094b40576f2",
+    "firmware-emulation/references/qemu-user.md": "04aea71bff2d43b90fdcb328bcf0af825043e22b5263e32330c8aa0da4784ddf",
+    "firmware-extraction/SKILL.md": "c9c5260a38d2690cd841d88021855879eb43f146001a16776c5eb41e9fa7e712",
+    "firmware-extraction/references/binwalk.md": "45cb724eb884b7a70e3c8dd6d5ab4d4fadf425688a2f53c05ee3843879cf71f0",
+    "firmware-extraction/references/encryption.md": "0398f9400f7622337a6661d2f6e43ad38dc4f7299bb8d39aceff0191dcdd4509",
+    "firmware-extraction/references/filesystems.md": "5ec003c788b9b835539803afca492820324f0c7120985514c2621481f7c362d9",
+    "firmware-extraction/references/troubleshooting.md": "15638299ec11b300af1cf40987016672ee9b9a8069265e99ae68611ceb7ce5bb",
+    "firmware-security-reports/SKILL.md": "4170f723c69a9bd36cc47d01545d705e475899fba7144350773ce1b6dba70a2d",
+    "firmware-security-reports/assets/finding_template.md": "521e4fbc1ce03aecd5bfbb31c89da6ed5c17916658f62588607bd5ea94bc1dd6",
+    "firmware-security-reports/assets/pentest_report_template.md": "c2b24b5b242a4a38a23ff25f4e0ffdd0eeaa251e6acbcf515985dab036048428",
+    "firmware-security-reports/assets/working_notes_template.md": "89f8f47e1965975dc6444bdd508933669ee60c40374f94be03bd7a23f00d9780",
+    "firmware-security-reports/references/cvss-scoring.md": "2f85732c00832cd4eb1f2f4bfbd9f23110d7790b41ae340c3cfe2fa2e2bd87fb",
+    "firmware-static-analysis/SKILL.md": "5afc5736ed2ec5fc8e4ca14074da597dc197617bd9ce1b6582521fa9cf7514aa",
+    "firmware-static-analysis/references/architectures.md": "1d0cc8cbe8a8ed18624a2a93ed06612acd7c18236624b53f550daae1408963bc",
+    "firmware-static-analysis/references/toolchain.md": "f26d54677bed8843f8c3e15c9586c999693b6035f3d1a0fe066088895bcb011a",
+    "ghidra-re/SKILL.md": "f008b480e6ae95a40901b8db671698a972834cd1653568e9bc438c38f6d39bac",
+    "ghidra-re/references/stripped-analysis.md": "0cd9a1e117647dc7d020404311936ab61e2560829dcfde4dd4e20ad4eb0c8849",
+    "ghidra-re/references/workflow.md": "45bc092355a931d6b7310c9bb58e3343a5c73530958fccca2012afa6379dde07",
+    "ghidra-re/scripts/find_auth_functions.py": "c088f6106f113f128daaa631df4ecbd605006d18ab38128195e8f269f5dca6cf",
+    "ghidra-re/scripts/find_buffer_overflows.py": "7e6a948505d9534f60c2b93bcb2b1de834f997cd0186e93b0a5f6255611b3b03",
+    "ghidra-re/scripts/find_crypto.py": "9cf1a77f1fb391ef3efda7a82231d4a1fc4d60c925a033ee1885c0c1e7944839"
+  }
+}

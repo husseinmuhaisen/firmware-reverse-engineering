@@ -1,0 +1,36 @@
+name: Validate packaging
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python tools/validate_repo.py
+      - run: python -m unittest discover -s tests -v
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - name: Install pinned packaging tools
+        run: npm install --global @anthropic-ai/claude-code@2.1.263 @openai/codex@0.153.4 skills@1.5.24
+      - name: Validate with Claude Code
+        run: |
+          claude plugin validate . --strict
+          claude plugin validate ./plugins/firmware-reverse-engineering --strict
+      - name: Check Codex discovery without model calls
+        run: python tools/check_codex_discovery.py
+      - name: Check standalone skill discovery
+        run: skills add . --list
