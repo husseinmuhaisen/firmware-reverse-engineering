@@ -1,8 +1,8 @@
 {
   "name": "firmware-reverse-engineering",
   "owner": {
-    "name": "Hussein Muhaisen",
-    "url": "https://github.com/husseinmuhaisen"
+    "name": "OrbitCurve",
+    "url": "https://github.com/OrbitCurve"
   },
   "metadata": {
     "description": "Firmware extraction, static analysis, Ghidra reverse engineering, emulation, and security reporting skills."

@@ -6,7 +6,7 @@
     "name": "Hussein Muhaisen",
     "url": "https://github.com/husseinmuhaisen"
   },
-  "repository": "https://github.com/husseinmuhaisen/firmware-reverse-engineering",
+  "repository": "https://github.com/OrbitCurve/firmware-reverse-engineering",
   "keywords": [
     "firmware",
     "reverse-engineering",
@@ -19,7 +19,7 @@
     "displayName": "Firmware Reverse Engineering",
     "shortDescription": "Firmware extraction, analysis, emulation, and reporting.",
     "longDescription": "Firmware extraction, static analysis, Ghidra reverse engineering, emulation, and security reporting skills.",
-    "developerName": "Hussein Muhaisen",
+    "developerName": "OrbitCurve",
     "category": "Security",
     "capabilities": [
       "Read",
