@@ -2,6 +2,11 @@
 
 Guide to running individual binaries from firmware without full system emulation.
 
+`-L` is an ELF interpreter prefix, not a chroot. The emulated program can
+access host paths and networking. Run unknown firmware inside a disposable VM.
+For a chroot shell to start further foreign binaries, configure binfmt_misc in
+that VM or prefix each invocation with the matching static QEMU executable.
+
 ## Overview
 
 User-mode emulation runs a single binary from the extracted firmware using the host kernel, translating system calls on the fly. This is faster and simpler than system-mode but less authentic.
@@ -168,8 +173,9 @@ sudo chroot /mnt/firmware /usr/bin/qemu-arm-static /usr/sbin/dropbear -F -E
 
 ```bash
 # Use AFL++ with QEMU mode
-export AFL_QEMU_CPU=cortex-a9
-afl-fuzz -Q -i input_dir -o output_dir -- qemu-arm -L ./rootfs/ ./binary @@
+export QEMU_LD_PREFIX="$PWD/rootfs"
+# Build AFL++ QEMU instrumentation for the target architecture first.
+afl-fuzz -Q -i input_dir -o output_dir -- ./binary @@
 
 # Or with custom fuzzer
 for i in $(seq 1 1000); do
@@ -208,9 +214,8 @@ sudo apt-get install qemu-user-static
 
 **Hardware I/O:**
 ```bash
-# Mock hardware interfaces
-# Create fake devices in chroot
-sudo mknod /mnt/firmware/dev/gpio0 c 254 0
+# Creating a device node does not implement its driver or ioctls.
+# Use a reviewed shim/harness or a system emulator that models the device.
 
 # Or patch binary to skip hardware calls (advanced)
 ```
@@ -224,7 +229,7 @@ sudo mknod /mnt/firmware/dev/gpio0 c 254 0
 ldd /bin/binary
 
 # Outside chroot (for cross-arch)
-qemu-arm -L ./rootfs/ /lib/ld-linux.so.3 --list ./rootfs/bin/binary
+qemu-arm -L ./rootfs/ ./rootfs/lib/ld-linux.so.3 --list ./rootfs/bin/binary
 ```
 
 ### Missing Libraries
@@ -234,10 +239,11 @@ qemu-arm -L ./rootfs/ /lib/ld-linux.so.3 --list ./rootfs/bin/binary
 find ./squashfs-root/ -name "libmissing.so*"
 
 # If not found, may need to extract from another partition
-# Or install in host system
+# Use a library from the same firmware or an ABI-compatible target sysroot;
+# host x86 libraries cannot satisfy ARM/MIPS dependencies.
 
 # Copy to rootfs
-sudo cp /lib/libmissing.so.1 /mnt/firmware/lib/
+sudo cp /path/to/target-sysroot/lib/libmissing.so.1 /mnt/firmware/lib/
 ```
 
 ## Scripting User-Mode Emulation
@@ -253,11 +259,11 @@ QEMU_ARCH="qemu-arm-static"
 
 # Ensure qemu-static is present
 if [ ! -f "$ROOTFS/usr/bin/$QEMU_ARCH" ]; then
-    sudo cp /usr/bin/$QEMU_ARCH $ROOTFS/usr/bin/
+    sudo cp "/usr/bin/$QEMU_ARCH" "$ROOTFS/usr/bin/"
 fi
 
 # Run binary with args
-sudo chroot $ROOTFS /usr/bin/$QEMU_ARCH "$@"
+sudo chroot "$ROOTFS" "/usr/bin/$QEMU_ARCH" "$@"
 ```
 
 Usage:
@@ -280,10 +286,10 @@ services=("/usr/sbin/httpd" "/usr/sbin/telnetd" "/usr/sbin/ftpd")
 
 for service in "${services[@]}"; do
     echo "Starting $service..."
-    sudo chroot $ROOTFS /usr/bin/$QEMU_ARCH $service -F &
+    sudo chroot "$ROOTFS" "/usr/bin/$QEMU_ARCH" "$service" &  # Supply the correct foreground option for this daemon
 done
 
-echo "All services started. PIDs:"
+echo "Launch attempts submitted; inspect logs and listeners. Job PIDs:"
 jobs -p
 ```
 
@@ -339,19 +345,16 @@ User-mode is significantly faster than system-mode:
 - Direct system call translation
 - Less overhead
 
-**Typical speedup: 10-50x faster than system-mode**
+Performance is workload-dependent; benchmark the specific target and configuration.
 
 ### Optimization
 
 ```bash
-# Use static QEMU binaries (faster)
-qemu-arm-static vs qemu-arm
+# Static QEMU is useful in chroots because it needs no host shared libraries.
+# Static linking does not inherently make emulation faster.
+# TCG translation and block caching are automatic; there is no QEMU_JIT switch.
+qemu-arm -cpu help
 
-# Enable JIT (default, but can be tuned)
-# Set environment: QEMU_JIT=1
-
-# For long-running processes, consider cache
-# QEMU caches translated blocks
 ```
 
 ## Combining with Other Tools
@@ -372,18 +375,19 @@ qemu-arm -g 1234 -L ./rootfs/ ./binary
 ### With Frida
 
 ```bash
-# Dynamic instrumentation
-# Install frida-server for target arch
-# Then inject into QEMU process
+# For supported target architectures, run matching frida-server inside a
+# full-system guest with the required privileges and a working ptrace interface.
+# Connect from the host over the isolated guest network:
+frida -H 192.168.100.2:27042 -f /bin/binary -l script.js
+# QEMU user-mode is not equivalent: there is no Frida --qemu option.
 
-frida -U -f /bin/binary -l script.js --qemu
 ```
 
 ### With Radare2
 
 ```bash
 # Debug with r2
-r2 -d 'qemu-arm -g 1234 -L ./rootfs/ ./binary'
+# Start qemu-arm -g 1234 separately; host process attach debugs QEMU itself.
 
 # Or connect to running QEMU
 r2 -D gdb -d gdb://localhost:1234
@@ -448,7 +452,7 @@ netstat -tulpn | grep :80
 
 ## Best Practices
 
-1. **Always use chroot when possible** - Most authentic environment
+1. **Use an isolated VM** - A chroot helps path fidelity but does not isolate the kernel
 2. **Copy qemu-static, not qemu** - Static version has no dependencies
 3. **Check architecture first** - Use `file` before selecting QEMU
 4. **Start with -L flag** - Provide correct library paths

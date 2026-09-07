@@ -1,6 +1,10 @@
 # Binwalk Reference
 
-Comprehensive guide to binwalk usage for firmware analysis.
+Command reference for **Binwalk 3.1.0**. Check `binwalk --version` and
+`binwalk --help`: development-branch and legacy 2.x options differ.
+See the [tagged installation guide](https://github.com/ReFirmLabs/binwalk/blob/v3.1.0/README.md)
+for build and external extractor dependencies. The Rust CLI does not provide the
+legacy Python `binwalk` module required by some Firmadyne-based extractors.
 
 ## Basic Usage
 
@@ -10,16 +14,16 @@ Comprehensive guide to binwalk usage for firmware analysis.
 # Basic scan
 binwalk firmware.bin
 
-# Verbose output
+# Display all recursive extraction results (primarily useful with -M)
 binwalk -v firmware.bin
 
 # Show only specific signatures
-binwalk -y filesystem firmware.bin
-binwalk -y archive firmware.bin
-binwalk -y compression firmware.bin
+binwalk firmware.bin --include squashfs,jffs2,ubi,cramfs,ext
+binwalk firmware.bin --include tarball,zip
+binwalk firmware.bin --include gzip,xz,lzma
 
 # Exclude certain signatures
-binwalk -X jpeg firmware.bin  # Exclude JPEG
+binwalk firmware.bin --exclude jpeg  # Exclude JPEG
 ```
 
 ### Extraction
@@ -31,28 +35,27 @@ binwalk -e firmware.bin
 # Extract to specific directory
 binwalk -e firmware.bin -C /path/to/output
 
-# Extract with original offsets preserved
-binwalk -e --dd='.*' firmware.bin
-
-# Manual extraction using dd rules
-binwalk -e --dd='squashfs:squashfs' firmware.bin
+# Carve a verified component without executing an extractor
+dd if=firmware.bin of=component.bin bs=1 skip=OFFSET count=LENGTH
 ```
 
 ### Advanced Scanning
 
 ```bash
-# Show raw signatures (no filtering)
-binwalk -A firmware.bin
+# Search supported signatures at all offsets
+binwalk -a firmware.bin
 
-# Scan with custom signature file
-binwalk -B custom_signatures.txt firmware.bin
+# List exact supported signature names and extractor commands
+binwalk -L
 
-# Byte-level scan (slower but more thorough)
-binwalk -R firmware.bin
-
-# Disassemble executable code
-binwalk -Y firmware.bin
+# Machine-readable log
+binwalk firmware.bin --log scan.json
 ```
+
+Binwalk 3.1.0 has no legacy opcode scan, raw-pattern, custom-magic-file or
+`--dd` rule interface. Use architecture-appropriate `objdump` for disassembly,
+a byte-search script for raw patterns, and `dd` for explicit carving. Custom
+signature development requires the Rust signature API.
 
 ## Entropy Analysis
 
@@ -61,20 +64,20 @@ binwalk -Y firmware.bin
 binwalk -E firmware.bin
 
 # Save entropy plot as PNG
-binwalk -E -J firmware.bin
+binwalk -E firmware.bin
 
-# Set custom block size for entropy
-binwalk -E -K 1024 firmware.bin
+# Also write per-block entropy values to JSON (block size is selected internally)
+binwalk -E firmware.bin --log entropy.json
 
 # Combine signature scan with entropy
 binwalk -E firmware.bin && binwalk firmware.bin
 ```
 
-**Interpreting entropy:**
-- **8.0 (red)**: Encrypted or highly compressed
-- **7.0-7.5 (orange/yellow)**: Compressed data
-- **5.0-6.5 (green)**: Normal mixed data
-- **<5.0 (blue)**: Structured or sparse data
+**Interpreting entropy:** Values range from 0 to 8 bits per byte. Near-uniform
+compressed data and encrypted data can both approach 8; colors and thresholds
+do not identify a format. Corroborate changes with signatures, headers and
+successful parsing. `-E` writes `firmware.bin.png` in the current directory;
+choose a clean output directory for repeated plots.
 
 ## Extraction Strategies
 
@@ -86,31 +89,21 @@ Binwalk's automatic extraction uses magic signatures and known file formats.
 binwalk -e firmware.bin
 ```
 
-**Output structure:**
-```
-_firmware.bin.extracted/
-├── 0.squashfs           # Raw extracted data
-├── squashfs-root/       # Extracted filesystem
-├── 10000.gzip           # Compressed section
-└── 20000.jffs2          # Another filesystem
-```
+Output goes under `extractions/` by default, or the path supplied to `-C`.
+Inspect the report and resulting directories; paths depend on signature offset
+and extractor. Binwalk 2's `_firmware.bin.extracted` layout is not portable.
 
-### Manual Extraction with DD
-
-For better control, use manual dd extraction rules:
+### Selecting Component Types
 
 ```bash
-# Extract specific types
-binwalk -e --dd='squashfs:squashfs' firmware.bin
-binwalk -e --dd='jffs2:jffs2' firmware.bin
-binwalk -e --dd='gzip:gzip' firmware.bin
-
-# Extract all
-binwalk -e --dd='.*' firmware.bin
-
-# Custom rules
-binwalk -e --dd='squashfs filesystem:sqsh:squashfs' firmware.bin
+# Filename precedes the variable-length --include list
+binwalk -e firmware.bin --include squashfs
+binwalk -e firmware.bin --include jffs2
+binwalk -e firmware.bin --include gzip
 ```
+
+Use `binwalk -L` to check exact names. Header sizes and decompressor results are
+better evidence of component length than the next signature offset.
 
 ### Carving Specific Regions
 
@@ -168,18 +161,15 @@ ls -lh extracted_files/
 
 | Option | Description |
 |--------|-------------|
-| `-e` | Extract known file types |
-| `-E` | Calculate file entropy |
-| `-J` | Save entropy plot as PNG |
-| `-A` | Scan for common executable opcodes |
-| `-R` | Raw signature scan (no smart filtering) |
-| `-v` | Verbose output |
-| `-q` | Quiet mode (errors only) |
+| `-e` | Extract recognized file types using installed extractors |
+| `-E` | Calculate entropy and write a PNG (separate from `-e`) |
+| `-a` | Search all signatures at all offsets |
+| `-L` | List signatures and extractors |
+| `-v` | Display all results during recursive extraction |
+| `-q` | Suppress stdout |
 | `-M` | Recursively scan extracted files |
-| `-C <dir>` | Extract to custom directory |
-| `-K <size>` | Set custom block size |
-| `-y <type>` | Show only specified signature types |
-| `-X <type>` | Exclude specified signature types |
-| `-I` | Disable smart signature scanning |
-| `-B` | Use custom signature file |
-| `--dd='<rule>'` | Manual DD extraction rules |
+| `-C <dir>` | Extraction output directory |
+| `-l <file>` | Write JSON log |
+| `-t <count>` | Number of threads |
+| `--include <names>` | Comma-separated signature names; put filename first |
+| `--exclude <names>` | Exclude signature names; put filename first |

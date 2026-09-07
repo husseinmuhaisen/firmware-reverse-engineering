@@ -1,6 +1,6 @@
 ---
 name: firmware-extraction
-description: "Comprehensive firmware extraction and unpacking from binary images using binwalk and filesystem-specific tools. Use when Claude needs to extract filesystems and files from firmware binaries (.bin files) obtained from device dumps or manufacturer downloads. Covers: (1) Initial reconnaissance and entropy analysis, (2) Signature-based extraction with binwalk, (3) Filesystem-specific extraction (SquashFS, JFFS2, UBIFS, CramFS, YAFFS2, ext, etc.), (4) Handling encrypted and obfuscated firmware, (5) Multi-stage and nested firmware images, (6) Edge cases like corrupted or non-standard formats. Does NOT handle individual ELF binary analysis (use firmware-static-analysis skill for that) or dynamic analysis/emulation."
+description: "Comprehensive firmware extraction and unpacking from binary images using binwalk and filesystem-specific tools. Use when the agent needs to extract filesystems and files from firmware binaries (.bin files) obtained from device dumps or manufacturer downloads. Covers: (1) Initial reconnaissance and entropy analysis, (2) Signature-based extraction with binwalk, (3) Filesystem-specific extraction (SquashFS, JFFS2, UBIFS, CramFS, YAFFS2, ext, etc.), (4) Handling encrypted and obfuscated firmware, (5) Multi-stage and nested firmware images, (6) Edge cases like corrupted or non-standard formats. Does NOT handle individual ELF binary analysis (use firmware-static-analysis skill for that) or dynamic analysis/emulation."
 ---
 
 # Firmware Extraction & Unpacking
@@ -22,18 +22,28 @@ Follow this workflow sequentially for comprehensive firmware extraction:
 
 ## Prerequisites
 
+Use a disposable Linux analysis VM. Kernel mounting and external extractors parse
+untrusted data; keep the original image read-only and work on copies. Examples
+target **Binwalk 3.1.0** (the latest tagged release checked), not Binwalk 2 or
+unreleased branch flags. Install `pipx` before the Python CLI tools below.
+
 Ensure required tools are installed before starting:
 
 ```bash
 # Core tools
-sudo apt-get install binwalk squashfs-tools mtd-utils gzip bzip2 xz-utils
+sudo apt-get install squashfs-tools mtd-utils gzip bzip2 xz-utils util-linux pipx
+# Install Binwalk 3.1.0 and its extractor dependencies using the upstream guide:
+# https://github.com/ReFirmLabs/binwalk/blob/v3.1.0/README.md
+binwalk --version
+binwalk --help
 
 # Filesystem-specific tools
-pip3 install jefferson ubi_reader  # JFFS2 and UBIFS
+pipx install jefferson
+pipx install ubi-reader  # JFFS2 and UBIFS
 git clone https://github.com/devttys0/sasquatch && cd sasquatch && ./build.sh  # Non-standard SquashFS
 
 # Optional but recommended
-sudo apt-get install cramfsprogs android-sdk-libsparse-utils
+sudo apt-get install android-sdk-libsparse-utils pipx
 pip3 install python-lzo  # For UBIFS LZO compression
 ```
 
@@ -71,7 +81,7 @@ sha256sum firmware.bin > firmware.bin.sha256
 
 ## Step 2: Entropy Analysis
 
-Entropy analysis reveals encryption, compression, and data structure.
+Entropy highlights byte-distribution changes; it cannot distinguish encryption from compression.
 
 ### Generate Entropy Plot
 
@@ -80,18 +90,17 @@ Entropy analysis reveals encryption, compression, and data structure.
 binwalk -E firmware.bin
 
 # Generate visual plot
-binwalk -E -J firmware.bin
+binwalk -E firmware.bin
 # Creates firmware.bin.png showing entropy visualization
 ```
 
 ### Interpret Entropy Results
 
-**Entropy values:**
-- **~8.0 (flat high)**: Likely encrypted - see `references/encryption.md`
-- **~7.0-7.5 (variable)**: Compressed data (normal)
-- **~5.0-6.5 (medium)**: Mixed code and data (normal)
-- **~4.0-5.0 (low)**: Structured data or sparse regions
-- **Sharp transitions**: Boundaries between components
+**Entropy values (Binwalk 3.1.0, bits per byte):**
+- Values approach 8 for near-uniform data, including compressed and encrypted content.
+- Lower values indicate a less uniform distribution, not a specific file type.
+- Transitions suggest candidate boundaries; corroborate with headers and parsers.
+- Record block size/tool version; short blocks affect estimates. See `references/encryption.md`.
 
 **Common patterns:**
 ```
@@ -124,9 +133,9 @@ Identify all embedded components using binwalk's signature database.
 binwalk -v firmware.bin | tee scan_results.txt
 
 # Scan for specific types
-binwalk -y filesystem firmware.bin
-binwalk -y compression firmware.bin
-binwalk -y archive firmware.bin
+binwalk firmware.bin --include squashfs,jffs2,ubi,cramfs,ext
+binwalk firmware.bin --include gzip,xz,lzma
+binwalk firmware.bin --include tarball,zip
 ```
 
 ### Analyze Scan Results
@@ -144,7 +153,7 @@ DECIMAL       HEXADECIMAL     DESCRIPTION
 **Key information to extract:**
 - **Offsets**: Where each component starts (DECIMAL/HEX)
 - **Types**: Filesystem types, compression formats
-- **Sizes**: Implied by next offset or file size
+- **Sizes**: Validate with format headers and extractor output; the next signature may be nested or a false positive
 - **Endianness**: Critical for multi-architecture firmware
 
 ### Save and Review
@@ -167,25 +176,20 @@ Extract all identified components using binwalk's automatic extraction.
 # Extract everything binwalk can handle
 binwalk -e firmware.bin -C extracted/
 
-# Alternative: Manual control with dd rules
-binwalk -e --dd='.*' firmware.bin -C extracted/
+# Alternative: carve a verified offset and length from the scan/header
+dd if=firmware.bin of=component.bin bs=1 skip=OFFSET count=LENGTH
 ```
 
-**Output structure:**
-```
-extracted/
-├── _firmware.bin.extracted/
-│   ├── 0                    # Raw data at offset 0
-│   ├── 1C.7z               # LZMA compressed (if recognized)
-│   ├── 40000               # SquashFS raw data
-│   ├── squashfs-root/      # Extracted SquashFS (if successful)
-│   └── 2C0000.jffs2        # JFFS2 raw data
-```
+Binwalk 3.1.0 writes below the directory selected by `-C` (default:
+`extractions`). Per-signature subdirectories and extractor output names vary;
+use the paths printed in the extraction report, rather than assuming Binwalk 2's
+`_firmware.bin.extracted/squashfs-root` layout.
 
 ### Verify Extraction
 
 ```bash
-cd extracted/_firmware.bin.extracted/
+cd extracted/
+find . -maxdepth 4 -type d
 
 # Check what was extracted
 ls -lh
@@ -231,13 +235,13 @@ unsquashfs -d squashfs-root squashfs.img
 # 3. If that fails (common with routers), use sasquatch
 sasquatch squashfs.img
 
-# 4. Force extraction even with errors
-unsquashfs -force -d squashfs-root squashfs.img
+# 4. Only to overwrite existing output after verifying the image; does not repair errors
+unsquashfs -f -d squashfs-root squashfs.img
 ```
 
 **Troubleshooting SquashFS:**
 - **"unknown compression type"** → Use sasquatch (supports non-standard variants)
-- **"filesystem corruption"** → Try `-force` flag
+- **"filesystem corruption"** → Verify offset, length and checksum; preserve errors and try a matching extractor
 - **Wrong endianness** → Check binwalk scan for endianness hint
 - **Multiple SquashFS images** → Extract each by offset separately
 
@@ -255,25 +259,17 @@ dd if=firmware.bin of=jffs2.img bs=1 skip=OFFSET
 jefferson jffs2.img -d jffs2-root/
 
 # If endianness issues
-jefferson --big-endian jffs2.img -d jffs2-root/
+jefferson -v jffs2.img -d jffs2-root-review/
 ```
 
-**Alternative (requires root on Linux):**
-```bash
-# Mount as loopback device
-modprobe mtdblock mtdram
-modprobe jffs2
-dd if=jffs2.img of=/tmp/jffs2.img
-mkdir /mnt/jffs2
-mount -t jffs2 -o loop /tmp/jffs2.img /mnt/jffs2
-# Copy out files
-cp -a /mnt/jffs2/* ./jffs2-root/
-umount /mnt/jffs2
-```
+**Kernel alternative:** JFFS2 requires an MTD device, not a loop device.
+Mounting needs a correctly provisioned emulated MTD in an isolated VM; simply
+loading `mtdram` and mounting the file does not populate that device. Prefer
+Jefferson for extraction and retain its error log.
 
 **Troubleshooting JFFS2:**
 - **Incomplete extraction** → jefferson handles corrupted nodes better than mount
-- **Endianness errors** → Use `--big-endian` or `--little-endian` flags
+- **Endianness errors** → Jefferson detects byte order; verify image offset and node magic
 - **Empty output** → Verify offset is correct with `xxd`
 
 **Reference**: See `references/filesystems.md` section on JFFS2.
@@ -309,13 +305,13 @@ Legacy compressed filesystem.
 # Extract raw CramFS
 dd if=firmware.bin of=cramfs.img bs=1 skip=OFFSET
 
-# Extract with cramfsck
-cramfsck -x cramfs-root/ cramfs.img
+# Extract with util-linux fsck.cramfs
+fsck.cramfs --extract=cramfs-root cramfs.img
 
 # Alternative: mount (requires root)
 mkdir /mnt/cramfs
-mount -t cramfs -o loop cramfs.img /mnt/cramfs
-cp -a /mnt/cramfs/* ./cramfs-root/
+mount -t cramfs -o loop,ro cramfs.img /mnt/cramfs
+cp -a /mnt/cramfs/. ./cramfs-root/
 umount /mnt/cramfs
 ```
 
@@ -331,9 +327,9 @@ dd if=firmware.bin of=ext.img bs=1 skip=OFFSET
 
 # Mount directly (easiest, may require root)
 mkdir ext-root
-sudo mount -o loop ext.img ext-root/
+sudo mount -o loop,ro,noload ext.img ext-root/
 # Copy files
-sudo cp -a ext-root/* ./extracted-ext/
+sudo cp -a ext-root/. ./extracted-ext/
 sudo umount ext-root/
 
 # Alternative: use debugfs (no root needed)
@@ -345,7 +341,7 @@ debugfs ext.img
 
 **Troubleshooting ext:**
 - **Journal errors** → Mount with `-o noload` to skip journal
-- **Superblock errors** → Try alternative superblocks: `-o sb=32768`
+- **Superblock errors** → Determine actual backup superblocks from this image; do not guess offsets. Repair only a copy.
 
 **Reference**: See `references/filesystems.md` section on ext2/3/4.
 
@@ -358,7 +354,8 @@ Android and some embedded NAND flash systems.
 dd if=firmware.bin of=yaffs2.img bs=1 skip=OFFSET
 
 # Use unyaffs
-unyaffs yaffs2.img yaffs2-root/
+mkdir -p yaffs2-root
+(cd yaffs2-root && unyaffs ../yaffs2.img)
 ```
 
 **Troubleshooting YAFFS2:**
@@ -416,10 +413,10 @@ find squashfs-root/ -name "passwd" -o -name "*.conf" -o -name "*.sh"
 
 ```bash
 # Check binaries are valid
-find squashfs-root/ -type f -name "*" | head -10 | xargs file
+find squashfs-root/ -type f -print0 | head -z -n 10 | xargs -0 -r file
 
 # Verify shared libraries
-find squashfs-root/ -name "*.so*" | head -5 | xargs file
+find squashfs-root/ -name "*.so*" -print0 | head -z -n 5 | xargs -0 -r file
 
 # Look for web interface
 ls squashfs-root/www/ squashfs-root/htdocs/ squashfs-root/var/www/ 2>/dev/null
@@ -523,7 +520,7 @@ python3 -c "
 data = open('firmware.bin', 'rb').read(4)
 for key in range(256):
     result = bytes([b ^ key for b in data])
-    if result in [b'hsqs', b'\\x19\\x85']:
+    if result.startswith((b'hsqs', b'sqsh', b'\\x19\\x85', b'\\x85\\x19')):
         print(f'Possible XOR key: {key:02x}')
 "
 ```
@@ -537,11 +534,11 @@ for key in range(256):
 
 **Approach:**
 ```bash
-# Force extraction even with errors
-unsquashfs -force squashfs.img
+# Overwrite existing output only; corruption still requires investigation
+unsquashfs -f squashfs.img
 
-# Skip corrupted sections
-jefferson --ignore-errors jffs2.img -d output/
+# Inspect errors and retain partial results; no generic ignore-errors flag
+jefferson -vv jffs2.img -d output-review/ 2>&1 | tee jefferson.log
 
 # Manual carving
 dd if=firmware.bin of=carved.bin bs=1 skip=OFFSET count=ESTIMATED_SIZE
@@ -557,12 +554,12 @@ dd if=firmware.bin of=carved.bin bs=1 skip=OFFSET count=ESTIMATED_SIZE
 **Approach:**
 ```bash
 # Search for filesystem signatures manually
-xxd firmware.bin | grep -E "68 73 71 73|19 85"  # Look for hsqs, JFFS2
+xxd -g 1 firmware.bin | grep -E "68 73 71 73|19 85"  # Look for hsqs, JFFS2
 
 # Extract with adjusted offset
 dd if=firmware.bin of=fs.img bs=1 skip=ADJUSTED_OFFSET
 
-# Try extraction tools with force flags
+# Verify the adjusted image header before trying a compatible extractor
 ```
 
 ### Edge Case 4: Concatenated Multiple Firmwares
@@ -627,7 +624,7 @@ Create a comprehensive extraction report:
 ## Entropy Analysis
 
 - Overall entropy: [value]
-- Encryption detected: [Yes/No]
+- Encryption evidence: [Confirmed/Suspected/Not established; cite evidence]
 - Key findings: [encrypted sections, compression, etc.]
 
 ## Component Map
@@ -732,9 +729,9 @@ Create a comprehensive extraction report:
 |---------|----------|
 | High entropy, no signatures | Check `references/encryption.md` |
 | SquashFS extraction fails | Try sasquatch instead of unsquashfs |
-| JFFS2 incomplete | Use jefferson with `--ignore-errors` |
+| JFFS2 incomplete | Inspect `jefferson -vv` logs; record missing/corrupted nodes |
 | UBIFS won't extract | Use ubi_reader tools, check PEB size |
 | Binwalk finds nothing | Manual hex analysis, check for obfuscation |
-| Corrupted filesystem | Try force extraction flags |
+| Corrupted filesystem | Verify bounds and format; retain logs and label partial output |
 | Tools missing | Install prerequisites at top of skill |
 | Multiple nested levels | Recursive extraction, scan each component |

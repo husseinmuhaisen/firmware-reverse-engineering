@@ -45,15 +45,16 @@ Displays ELF file information.
 ### Basic Info
 ```bash
 readelf -h <binary>           # ELF header (entry point, type, machine)
-readelf -l <binary>           # Program headers (segments)
+readelf -lW <binary>           # Program headers (segments)
 readelf -S <binary>           # Section headers
 readelf -d <binary>           # Dynamic section (shared libraries)
 ```
 
 ### Symbols
 ```bash
-readelf -s <binary>           # Symbol table (.symtab)
-readelf -Ws <binary>          # Dynamic symbols (.dynsym) - works on stripped binaries
+readelf -s <binary>           # Symbol tables (.symtab and .dynsym, when present)
+readelf --dyn-syms --wide <binary>  # Dynamic symbols only (if .dynsym exists)
+readelf -Ws <binary>          # All symbol tables; -W prevents line wrapping
 readelf -Ws <binary> | grep <function_name>  # Find specific symbol
 ```
 
@@ -74,6 +75,10 @@ readelf -n <binary>           # Notes (build ID, ABI info)
 - `.plt`: Procedure linkage table (function stubs)
 - `.got`: Global offset table (addresses)
 
+Use a target-capable binutils build (for example `arm-linux-gnueabi-objdump`)
+for foreign architectures. `objdump -i` lists supported targets; the host
+`objdump` and `strip` may not support the firmware architecture.
+
 ## objdump
 
 Disassembles and displays object file information.
@@ -88,7 +93,7 @@ objdump -d -M intel <binary>             # Intel syntax (x86/x64 only)
 
 ### Other Info
 ```bash
-objdump -T <binary>           # Dynamic symbol table (alternative to readelf -Ws)
+objdump -T <binary>           # Dynamic symbol table (alternative to readelf --dyn-syms)
 objdump -t <binary>           # All symbol table
 objdump -x <binary>           # All headers
 objdump -s <binary>           # Full contents (hex dump)

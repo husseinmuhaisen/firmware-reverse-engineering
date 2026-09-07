@@ -1,5 +1,9 @@
 # Finding Template
 
+> Template: example findings, scores and evidence below are illustrative. Replace
+> them with verified assessment data and remove unused sections before delivery.
+
+
 ## FW-[ID]: [Vulnerability Title]
 
 **Severity:** [Critical/High/Medium/Low/Informational]  
@@ -207,18 +211,22 @@ if __name__ == "__main__":
 sprintf(command, "ping -c 4 %s", user_input);
 system(command);
 
-// AFTER (Secure):
+// AFTER (illustrative; run in a child with verified UID/GID and validated input):
 // 1. Validate input
 if (!is_valid_ip_address(user_input)) {
     return ERROR_INVALID_INPUT;
 }
 
-// 2. Use safe alternatives to system()
+// 2. In a privileged child, drop supplementary groups, GID and UID BEFORE exec.
+// Include <grp.h> and <unistd.h>; use verified non-root target IDs.
+if (setgroups(0, NULL) != 0 || setgid(UNPRIVILEGED_GROUP_ID) != 0 ||
+    setuid(UNPRIVILEGED_USER_ID) != 0) {
+    return ERROR_PRIVILEGE_DROP;
+}
+// 3. Invoke directly without a shell; do not continue privileged on failure.
 char *args[] = {"/bin/ping", "-c", "4", user_input, NULL};
 execv("/bin/ping", args);
-
-// 3. Drop privileges before execution
-setuid(UNPRIVILEGED_USER_ID);
+return ERROR_EXEC;  // Successful execv does not return.
 ```
 
 **Code Changes Required:**
@@ -286,11 +294,11 @@ Additional security measures:
 
 #### Success Criteria
 
-✅ Input validation rejects all malicious payloads  
-✅ Commands execute without shell interpretation  
-✅ Privileges dropped before command execution  
-✅ Logging implemented for security events  
-✅ No regression in legitimate functionality  
+Input validation rejects all malicious payloads
+Commands execute without shell interpretation
+Privileges dropped before command execution
+Logging implemented for security events
+No regression in legitimate functionality
 
 ---
 

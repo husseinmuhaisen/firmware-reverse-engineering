@@ -1,8 +1,21 @@
+# @runtime Jython
+# @category Firmware
 # find_auth_functions.py
 """
 Identify authentication and authorization functions
 Looks for password checks, strcmp calls, credential validation
 """
+
+from ghidra.program.model.symbol import SourceType
+
+from ghidra.util.task import TaskMonitor
+
+# Nested/headless invocations can have no monitor; use the active one if supplied.
+monitor = monitor or getControls().getMonitor() or TaskMonitor.DUMMY
+
+from ghidra.program.model.pcode import PcodeOp
+
+listing = currentProgram.getListing()
 
 def find_auth_functions():
     """Find potential authentication functions"""
@@ -22,9 +35,10 @@ def find_auth_functions():
         "crypt", "md5", "sha", "verify", "check"
     ]
     
-    print("=== Analyzing Functions for Authentication Logic ===\n")
+    print("=== Authentication candidates (manual verification required) ===\n")
     
     for func in fm.getFunctions(True):
+        monitor.checkCancelled()
         score = 0
         reasons = []
         
@@ -83,9 +97,9 @@ def find_auth_functions():
             i+1, func.getEntryPoint(), score))
         print("   {}".format(", ".join(reasons)))
         
-        # Rename high-confidence functions
-        if score >= 5 and func.getName().startswith("FUN_"):
-            new_name = "auth_candidate_" + str(func.getEntryPoint())[-4:]
+        # Rename only default symbols; the score is a ranking heuristic, not confidence
+        if score >= 5 and func.getSymbol().getSource() == SourceType.DEFAULT:
+            new_name = "auth_candidate_" + str(func.getEntryPoint()).replace(":", "_")
             func.setName(new_name, SourceType.ANALYSIS)
             print("   -> Renamed to {}".format(new_name))
         
@@ -97,6 +111,7 @@ def get_function_strings(func):
     instr_iter = listing.getInstructions(func.getBody(), True)
     
     for instr in instr_iter:
+        monitor.checkCancelled()
         for ref in instr.getReferencesFrom():
             data = listing.getDataAt(ref.getToAddress())
             if data and data.hasStringValue():
@@ -110,6 +125,7 @@ def get_called_functions(func):
     instr_iter = listing.getInstructions(func.getBody(), True)
     
     for instr in instr_iter:
+        monitor.checkCancelled()
         if instr.getFlowType().isCall():
             for ref in instr.getReferencesFrom():
                 if ref.getReferenceType().isCall():
@@ -125,11 +141,9 @@ def count_return_sites(func):
     instr_iter = listing.getInstructions(func.getBody(), True)
     
     for instr in instr_iter:
-        mnemonic = instr.getMnemonicString().lower()
-        if mnemonic in ["ret", "bx", "jr"] or "pop" in mnemonic:
-            # Check if it's actually a return
-            if instr.getFlowType().isTerminal():
-                count += 1
+        monitor.checkCancelled()
+        if any(op.getOpcode() == PcodeOp.RETURN for op in instr.getPcode()):
+            count += 1
     
     return count
 
@@ -141,11 +155,12 @@ def estimate_complexity(func):
     
     instr_iter = listing.getInstructions(func.getBody(), True)
     for instr in instr_iter:
+        monitor.checkCancelled()
         instr_count += 1
         if instr.getFlowType().isConditional():
             branch_count += 1
     
-    # Cyclomatic complexity approximation
+    # Instruction/branch ranking heuristic; this is not cyclomatic complexity
     return instr_count + branch_count * 2
 
 # Run analysis

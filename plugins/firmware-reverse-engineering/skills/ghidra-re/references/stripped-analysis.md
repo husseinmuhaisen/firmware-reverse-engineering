@@ -7,8 +7,9 @@ Expert techniques for reverse engineering binaries with no symbols.
 ### Import and Auto-Analysis
 
 ```python
+# @runtime Jython
 # analyze_binary.py - Headless analysis script
-# Usage: analyzeHeadless /project ProjectName -import binary.elf -postScript analyze_binary.py
+# Usage: "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /project ProjectName -scriptPath "$GHIDRA_SCRIPT_DIR" -import binary.elf -postScript analyze_binary.py
 
 from ghidra.program.model.symbol import SourceType
 from ghidra.app.decompiler import DecompInterface
@@ -21,9 +22,9 @@ fm = currentProgram.getFunctionManager()
 from ghidra.app.script import GhidraScriptUtil
 from ghidra.program.util import GhidraProgramUtilities
 
-state.addAnalysisOption("Decompiler Parameter ID", "true")
-state.addAnalysisOption("Stack", "true")
-state.addAnalysisOption("Aggressive Instruction Finder", "true")
+setAnalysisOption(currentProgram, "Decompiler Parameter ID", "true")
+setAnalysisOption(currentProgram, "Stack", "true")
+setAnalysisOption(currentProgram, "Aggressive Instruction Finder", "true")
 
 analyzeAll(currentProgram)
 ```
@@ -31,6 +32,7 @@ analyzeAll(currentProgram)
 ### Identify Entry Points
 
 ```python
+# @runtime Jython
 # find_entry_points.py
 # Locate function starts in stripped binaries
 
@@ -39,45 +41,41 @@ from ghidra.program.model.symbol import SymbolType, SourceType
 mem = currentProgram.getMemory()
 listing = currentProgram.getListing()
 
-# 1. Known entry point
-entry = currentProgram.getImageBase().add(
-    currentProgram.getMinAddress().getOffset()
-)
-createFunction(entry, "entry")
+# 1. Loader-provided entry points are not the image base.
+for entry in currentProgram.getSymbolTable().getExternalEntryPointIterator():
+    print("Loader entry: {}".format(entry))
+    # Review executable memory, instruction mode and existing function boundaries
+    # before disassembling/creating functions. Raw imports need a researched entry.
 
-# 2. Find prologues (ARM example)
-# ARM: push {r11, lr} / push {r4-r7, lr}
-# MIPS: addiu sp, sp, -XX / sw ra, XX(sp)
-# x86: push ebp / mov ebp, esp
+# 2. A32 prologue candidates (does not create functions automatically).
+# Only use for 32-bit ARM A32 code, not Thumb or AArch64.
+from jarray import array
 
 def find_arm_prologues():
-    """Find ARM function prologues"""
-    functions_found = []
-    
-    # Search for push {r11, lr} - 0xe92d4800
-    # and variations
-    patterns = [
-        "e92d4800",  # push {r11, lr}
-        "e92d48",    # push {r4-r7, lr}
-        "e52de004",  # push {lr}
-    ]
-    
-    for pattern in patterns:
-        addr = mem.getMinAddress()
-        while addr is not None:
-            addr = mem.findBytes(addr, pattern, None, True, monitor)
-            if addr and not listing.getFunctionAt(addr):
-                # Verify it's executable
-                if mem.getBlock(addr).isExecute():
-                    createFunction(addr, None)
-                    functions_found.append(addr)
-            if addr:
-                addr = addr.next()
-    
-    return functions_found
+    if str(currentProgram.getLanguage().getProcessor()) != "ARM":
+        raise ValueError("This example requires ARM32 A32 code")
+    # push {r11, lr}, instruction word 0xe92d4800; encode by memory byte order.
+    values = [0xe9, 0x2d, 0x48, 0x00] if currentProgram.getLanguage().isBigEndian() else [0x00, 0x48, 0x2d, 0xe9]
+    pattern = array([b if b < 128 else b - 256 for b in values], 'b')
+    candidates = []
+    for block in mem.getBlocks():
+        if not block.isInitialized() or not block.isExecute() or block.getSize() < 4:
+            continue
+        addr = block.getStart()
+        last = block.getEnd().subtract(3)
+        while addr and addr.compareTo(last) <= 0:
+            monitor.checkCancelled()
+            addr = mem.findBytes(addr, block.getEnd(), pattern, None, True, monitor)
+            if addr is None or addr.compareTo(last) > 0:
+                break
+            if addr.getOffset() % 4 == 0:
+                candidates.append(addr)
+            addr = addr.next() if addr.compareTo(last) < 0 else None
+    return candidates
 
-funcs = find_arm_prologues()
-print("Found {} potential functions".format(len(funcs)))
+# Review candidates in the listing: matching data and embedded constants are possible.
+print(find_arm_prologues())
+
 ```
 
 ## Function Identification
@@ -85,6 +83,7 @@ print("Found {} potential functions".format(len(funcs)))
 ### Cross-Reference Analysis
 
 ```python
+# @runtime Jython
 # xref_analysis.py - Identify functions via xrefs
 
 def find_functions_by_xrefs():
@@ -97,6 +96,8 @@ def find_functions_by_xrefs():
     candidates = set()
     
     # Scan for CALL/BL/JAL instructions
+    listing = currentProgram.getListing()
+    mem = currentProgram.getMemory()
     instr = listing.getInstructions(True)
     
     for ins in instr:
@@ -117,7 +118,7 @@ def find_functions_by_xrefs():
     # Create functions at candidates
     created = 0
     for addr in candidates:
-        if not listing.getFunctionAt(addr):
+        if not listing.getFunctionContaining(addr) and listing.getInstructionAt(addr):
             func = createFunction(addr, None)
             if func:
                 created += 1
@@ -131,6 +132,7 @@ find_functions_by_xrefs()
 ### String Reference Tracing
 
 ```python
+# @runtime Jython
 # string_xref_functions.py
 # Find functions using string references
 
@@ -138,6 +140,7 @@ def find_string_using_functions():
     """Identify functions by their string usage"""
     
     # Get all defined strings
+    listing = currentProgram.getListing()
     data_iter = listing.getDefinedData(True)
     string_refs = {}
     
@@ -157,28 +160,35 @@ def find_string_using_functions():
     
     # Analyze and rename based on strings
     for func, strings in string_refs.items():
+        if func.getSymbol().getSource() != SourceType.DEFAULT:
+            continue
         # Authentication function heuristics
         auth_keywords = ["password", "login", "auth", "user"]
         if any(kw in s.lower() for s in strings for kw in auth_keywords):
-            func.setName("auth_function_" + func.getEntryPoint().toString(), 
-                        SourceType.USER_DEFINED)
+            func.setName("auth_candidate_" + func.getEntryPoint().toString(),
+                        SourceType.ANALYSIS)
         
         # Network functions
         net_keywords = ["http", "socket", "connect", "send"]
-        if any(kw in s.lower() for s in strings for kw in net_keywords):
-            func.setName("net_function_" + func.getEntryPoint().toString(),
-                        SourceType.USER_DEFINED)
+        if func.getSymbol().getSource() == SourceType.DEFAULT and any(
+                kw in s.lower() for s in strings for kw in net_keywords):
+            func.setName("net_candidate_" + func.getEntryPoint().toString(),
+                        SourceType.ANALYSIS)
 
 find_string_using_functions()
 ```
 
 ## Type Recovery
 
-### Automatic Structure Analysis
+### Structure Analysis Sketch (Incomplete)
 
 ```python
+# @runtime Jython
 # recover_structures.py
-# Analyze memory access patterns to recover structures
+# Skeleton only: the LOAD/STORE interpretation is deliberately left to the analyst.
+# This does not recover structures.
+from ghidra.app.decompiler import DecompInterface
+from ghidra.program.model.pcode import PcodeOp
 
 from ghidra.program.model.data import *
 
@@ -190,6 +200,7 @@ def analyze_structure_accesses(func):
     
     results = decompiler.decompileFunction(func, 30, monitor)
     if not results.decompileCompleted():
+        decompiler.dispose()
         return None
     
     high_func = results.getHighFunction()
@@ -202,18 +213,21 @@ def analyze_structure_accesses(func):
             # Analyze memory access
             pass  # Complex analysis here
     
+    decompiler.dispose()
     return access_patterns
 
 # Iterate all functions
 fm = currentProgram.getFunctionManager()
 for func in fm.getFunctions(True):
-    patterns = analyze_structure_accsets(func)
+    patterns = analyze_structure_accesses(func)
 ```
 
 ### Manual Structure Definition
 
 ```python
+# @runtime Jython
 # define_struct.py - Create structures programmatically
+from ghidra.program.model.data import *
 
 dtm = currentProgram.getDataTypeManager()
 
@@ -222,10 +236,10 @@ struct = StructureDataType("device_config", 0)
 
 # Add fields
 struct.add(DWordDataType(), 4, "magic", None)
-struct.add(PointerDataType(new CharDataType()), 
+struct.add(PointerDataType(CharDataType()),
           currentProgram.getDefaultPointerSize(), "name", None)
 struct.add(WordDataType(), 2, "port", None)
-struct.add(ArrayDataType(new ByteDataType(), 16, 1), "ip_addr", None)
+struct.add(ArrayDataType(ByteDataType(), 16, 1), "ip_addr", None)
 
 # Add to program
 dtm.addDataType(struct, DataTypeConflictHandler.DEFAULT_HANDLER)
@@ -240,23 +254,25 @@ createData(addr, struct)
 ### Constant Propagation
 
 ```python
+# @runtime Jython
 # const_prop.py - Track constant values through execution
 
 from ghidra.program.model.pcode import PcodeOp
 
-def trace_constant(func, reg_name):
-    """Trace constant value propagation"""
+def list_constant_copies(func):
+    """List decompiler COPY constants; not a register def-use analysis."""
     
     decompiler = DecompInterface()
     decompiler.openProgram(currentProgram)
     results = decompiler.decompileFunction(func, 30, monitor)
     
     if not results.decompileCompleted():
+        decompiler.dispose()
         return None
     
     high_func = results.getHighFunction()
     
-    # Build def-use chains
+    # List constant COPY operations (does not build def-use chains)
     for op in high_func.getPcodeOps():
         if op.getOpcode() == PcodeOp.COPY:
             output = op.getOutput()
@@ -265,13 +281,16 @@ def trace_constant(func, reg_name):
             if input.isConstant():
                 print("Constant {} assigned to {}".format(
                     input.getOffset(), output))
+    decompiler.dispose()
 ```
 
 ### Control Flow Flattening Detection
 
 ```python
+# @runtime Jython
 # detect_obfuscation.py
-# Identify control flow obfuscation
+# Identify high-fan-out blocks for manual review; ordinary switches also match.
+from ghidra.program.model.block import BasicBlockModel
 
 def detect_flattening(func):
     """Detect control flow flattening patterns"""
@@ -311,6 +330,7 @@ def detect_flattening(func):
 ### Calling Convention Analysis
 
 ```python
+# @runtime Jython
 # analyze_calling_convention.py
 
 def analyze_call_sites(func):
@@ -328,14 +348,11 @@ def analyze_call_sites(func):
             args_detected = []
             
             for i in range(5):  # Look back 5 instructions
-                prev_addr = prev_addr.previous()
-                if not prev_addr:
+                prev_instr = listing.getInstructionBefore(prev_addr)
+                if prev_instr is None or not func.getBody().contains(prev_instr.getAddress()):
                     break
-                
-                prev_instr = listing.getInstructionAt(prev_addr)
-                if not prev_instr:
-                    continue
-                
+                prev_addr = prev_instr.getAddress()
+                # Register mentions are hints, not proof of argument assignments.
                 # ARM: arguments in r0-r3
                 # MIPS: arguments in $a0-$a3
                 # x86: arguments on stack or registers
@@ -356,7 +373,9 @@ def analyze_call_sites(func):
 ### Return Value Tracking
 
 ```python
+# @runtime Jython
 # track_returns.py
+from ghidra.program.model.pcode import PcodeOp
 
 def analyze_return_value(func):
     """Identify what function returns"""
@@ -373,10 +392,9 @@ def analyze_return_value(func):
         # MIPS: jr $ra
         # x86: ret
         
-        if mnemonic in ["bx", "pop", "jr", "ret"]:
+        if any(op.getOpcode() == PcodeOp.RETURN for op in instr.getPcode()):
             # Look at previous instruction for return value
-            prev_addr = instr.getAddress().previous()
-            prev_instr = listing.getInstructionAt(prev_addr)
+            prev_instr = listing.getInstructionBefore(instr.getAddress())
             
             if prev_instr:
                 # ARM: return in r0
@@ -395,88 +413,19 @@ def analyze_return_value(func):
 
 ### Automated Function Naming
 
-```python
-# auto_rename.py - Intelligent function renaming
-
-def smart_rename_functions():
-    """Apply heuristics to name functions meaningfully"""
-    
-    fm = currentProgram.getFunctionManager()
-    
-    for func in fm.getFunctions(True):
-        name_hints = []
-        
-        # 1. String references
-        strings = get_strings_in_function(func)
-        if "init" in [s.lower() for s in strings]:
-            name_hints.append("init")
-        if any("error" in s.lower() for s in strings):
-            name_hints.append("error_handler")
-        
-        # 2. Called functions
-        called = get_called_functions(func)
-        if "printf" in called:
-            name_hints.append("print")
-        if "malloc" in called or "free" in called:
-            name_hints.append("mem")
-        if "socket" in called or "connect" in called:
-            name_hints.append("network")
-        
-        # 3. Complexity
-        if func.getBody().getNumAddresses() < 10:
-            name_hints.append("simple")
-        
-        # Build name
-        if name_hints and not func.getName().startswith("FUN_"):
-            continue  # Already renamed
-        
-        new_name = "_".join(name_hints) if name_hints else None
-        if new_name:
-            try:
-                func.setName(new_name + "_" + 
-                           func.getEntryPoint().toString()[-4:],
-                           SourceType.ANALYSIS)
-            except:
-                pass
-
-def get_strings_in_function(func):
-    """Extract strings referenced by function"""
-    strings = []
-    instr_iter = listing.getInstructions(func.getBody(), True)
-    
-    for instr in instr_iter:
-        for ref in instr.getReferencesFrom():
-            to_addr = ref.getToAddress()
-            data = listing.getDataAt(to_addr)
-            if data and data.hasStringValue():
-                strings.append(str(data.getValue()))
-    
-    return strings
-
-def get_called_functions(func):
-    """Get list of called function names"""
-    called = []
-    instr_iter = listing.getInstructions(func.getBody(), True)
-    
-    for instr in instr_iter:
-        if instr.getFlowType().isCall():
-            for ref in instr.getReferencesFrom():
-                if ref.getReferenceType().isCall():
-                    target_func = listing.getFunctionAt(ref.getToAddress())
-                    if target_func:
-                        called.append(target_func.getName())
-    
-    return called
-
-smart_rename_functions()
-```
+Run the bundled `scripts/auto_rename.py` with the headless setup in SKILL.md.
+It uses the string/API heuristics described here, marks names as candidates, and
+only renames default symbols. Existing analyst/imported names remain intact.
 
 ## Decompiler Enhancement
 
-### Custom Type Propagation
+### Custom Type Propagation Sketch (Incomplete)
 
 ```python
-# propagate_types.py
+# @runtime Jython
+# propagate_types.py - requires an analyst implementation of analyze_pointer_usage
+from ghidra.program.model.data import Pointer, PointerDataType
+from ghidra.program.model.symbol import SourceType
 
 def propagate_pointer_types():
     """Improve decompilation by propagating type information"""
@@ -511,6 +460,7 @@ def analyze_pointer_usage(func, param):
 ### Essential Ghidra Python APIs
 
 ```python
+# @runtime Jython
 # Navigation
 currentProgram                    # Current binary
 listing = currentProgram.getListing()

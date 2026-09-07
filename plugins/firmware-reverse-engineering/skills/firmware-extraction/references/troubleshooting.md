@@ -12,15 +12,16 @@ Common issues and solutions when extracting firmware.
 1. **Encrypted firmware**
    ```bash
    binwalk -E firmware.bin  # Check entropy
-   # High entropy (>0.9) suggests encryption
+   # Near 8 bits/byte can mean compression or encryption; not a diagnosis
    # See encryption.md for decryption workflows
    ```
 
 2. **Wrong offset/alignment**
    ```bash
    # Try different starting offsets
-   binwalk -o 0x1000 firmware.bin
-   binwalk -o 0x10000 firmware.bin
+   dd if=firmware.bin of=offset-1000.bin bs=1 skip=4096
+   binwalk offset-1000.bin
+   # Add 4096 to reported offsets to recover original-image positions.
    ```
 
 3. **Custom/proprietary format**
@@ -44,8 +45,9 @@ unsquashfs part.img    # For SquashFS
 jefferson part.img -d out/  # For JFFS2
 
 # 3. Check endianness
-sasquatch -le part.img  # Little endian
-sasquatch -be part.img  # Big endian
+file part.img
+xxd -g 1 -l 32 part.img
+sasquatch part.img  # Inspect the detected format; no generic -le/-be switch
 ```
 
 ## SquashFS Issues
@@ -56,7 +58,7 @@ sasquatch -be part.img  # Big endian
 # Use sasquatch for non-standard SquashFS
 sasquatch firmware.squashfs
 
-# Or force extraction
+# -f only overwrites existing output; it does not fix an invalid superblock
 unsquashfs -f firmware.squashfs
 ```
 
@@ -67,7 +69,7 @@ unsquashfs -f firmware.squashfs
 sasquatch firmware.squashfs
 
 # Or use binwalk auto-extraction
-binwalk -e --run-as=root firmware.bin
+binwalk -e firmware.bin
 ```
 
 ## JFFS2 Issues
@@ -75,9 +77,7 @@ binwalk -e --run-as=root firmware.bin
 ### Issue: jefferson incomplete extraction
 **Solution:**
 ```bash
-# Specify endianness
-jefferson -e little firmware.jffs2 -d out/
-jefferson -e big firmware.jffs2 -d out/
+# Jefferson detects byte order from JFFS2 nodes. Verify the carved start offset.
 
 # Verbose mode for debugging
 jefferson -v firmware.jffs2 -d out/

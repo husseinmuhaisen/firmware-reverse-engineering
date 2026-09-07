@@ -4,7 +4,7 @@ Complete guide to full-system firmware emulation with QEMU.
 
 ## Overview
 
-System-mode emulation runs the complete firmware stack: bootloader, kernel, and root filesystem. This provides the most authentic environment but is more complex to configure.
+System-mode emulation provides a guest kernel and modeled board. The examples below use direct kernel boot, bypassing the bootloader. Each recipe requires a kernel, DTB, CPU and storage drivers compatible with that board; arbitrary vendor images will not boot merely because their architecture matches.
 
 ## Architecture-Specific QEMU Machines
 
@@ -12,7 +12,7 @@ System-mode emulation runs the complete firmware stack: bootloader, kernel, and 
 
 **Common machines:**
 ```bash
-# Versatile Platform Board (most compatible)
+# Versatile Platform Board (requires a matching kernel/DTB)
 qemu-system-arm -M versatilepb
 
 # Versatile Express (Cortex-A9)
@@ -44,8 +44,7 @@ qemu-system-arm \
 # Virtual machine (most flexible)
 qemu-system-aarch64 -M virt
 
-# Versatile Express
-qemu-system-aarch64 -M vexpress-a15
+# vexpress-a15 models a 32-bit Cortex-A15; it is not an AArch64 guest machine.
 
 # Raspberry Pi 3
 qemu-system-aarch64 -M raspi3b
@@ -110,7 +109,7 @@ qemu-system-i386 \
 qemu-system-x86_64 \
   -kernel bzImage \
   -hda rootfs.ext4 \
-  -append "root=/dev/sda1 console=ttyS0" \
+  -append "root=/dev/sda console=ttyS0" \
   -enable-kvm \
   -nographic
 ```
@@ -140,7 +139,9 @@ file vmlinux
 binwalk vmlinux
 
 # Extract kernel from uImage
-dd if=uImage of=kernel.bin bs=64 skip=1
+# For a verified legacy, single-component uImage, strip the 64-byte header:
+dd if=uImage of=kernel.bin bs=1 skip=64 count=PAYLOAD_SIZE
+# Obtain PAYLOAD_SIZE from the validated header. FIT/multi-image formats differ.
 ```
 
 **Decompress kernel if needed:**
@@ -157,7 +158,7 @@ binwalk -e uImage
 
 ### 2. Device Tree Blob (DTB)
 
-**Required for ARM/AArch64, optional for others.**
+**Board/kernel dependent.** Modern ARM Linux commonly uses DTBs; legacy boards can use ATAGs. The `virt` board can generate a DTB. A vendor DTB cannot be made compatible simply by changing a few addresses.
 
 ```bash
 # Find DTB in firmware
@@ -187,16 +188,16 @@ dd if=/dev/zero of=rootfs.ext4 bs=1M count=256
 mkfs.ext4 rootfs.ext4
 mkdir /tmp/mnt
 sudo mount -o loop rootfs.ext4 /tmp/mnt
-sudo cp -a squashfs-root/* /tmp/mnt/
+sudo cp -a squashfs-root/. /tmp/mnt/
 sudo umount /tmp/mnt
 
 # Alternative: Use existing SquashFS directly
 # (Some QEMU configs support SquashFS as root)
 ```
 
-**Filesystem formats QEMU supports:**
+**Filesystems the guest kernel must support (QEMU supplies the block/MTD device):**
 - ext2/ext3/ext4 (recommended)
-- SquashFS (read-only, needs initramfs setup)
+- SquashFS (read-only; guest needs built-in filesystem/storage drivers or a suitable initramfs)
 - JFFS2/UBIFS (requires MTD emulation, advanced)
 
 ## Kernel Command Line Arguments
@@ -239,7 +240,7 @@ loglevel=8           # Maximum kernel logging
 -append "root=/dev/sda rootfstype=squashfs console=ttyS0 debug"
 
 # x86 with init override for debugging
--append "root=/dev/sda1 rw console=ttyS0 init=/bin/sh"
+-append "root=/dev/sda rw console=ttyS0 init=/bin/sh"
 ```
 
 ## Network Configuration
@@ -283,7 +284,7 @@ sudo iptables -A FORWARD -i eth0 -o tap0 -m state --state RELATED,ESTABLISHED -j
 -netdev user,id=net0 -device virtio-net-device,netdev=net0
 
 # With port forwarding (host:guest)
--netdev user,id=net0,hostfwd=tcp::8080-:80,hostfwd=tcp::2222-:22 \
+-netdev user,id=net0,hostfwd=tcp:127.0.0.1:8080-:80,hostfwd=tcp:127.0.0.1:2222-:22 \
 -device virtio-net-device,netdev=net0
 
 # Multiple NICs
@@ -338,7 +339,8 @@ echo "nameserver 10.0.2.3" > /etc/resolv.conf
 ### MTD (Flash) - Advanced
 ```bash
 # Requires MTD support in kernel
--mtdblock file=rootfs.jffs2
+-drive file=rootfs.jffs2,if=mtd,format=raw
+# Only for a machine that models a matching flash device; not a generic board option.
 ```
 
 ## Display Options
@@ -354,10 +356,10 @@ echo "nameserver 10.0.2.3" > /etc/resolv.conf
 -serial stdio
 
 # Redirect serial to TCP
--serial tcp::4444,server,nowait
+-serial tcp:127.0.0.1:4444,server,nowait
 
 # Multiple serial ports
--serial stdio -serial tcp::4444,server,nowait
+-serial stdio -serial tcp:127.0.0.1:4444,server,nowait
 ```
 
 ## Debugging Options
@@ -366,11 +368,11 @@ echo "nameserver 10.0.2.3" > /etc/resolv.conf
 
 ```bash
 # Start QEMU with GDB server on port 1234
--gdb tcp::1234 -S
+-gdb tcp:127.0.0.1:1234 -S
 
 # Alternative syntax
 -s -S
-# -s: shorthand for -gdb tcp::1234
+# -s binds the default TCP listener; prefer explicit loopback -gdb above.
 # -S: Pause at startup (wait for GDB)
 ```
 
@@ -388,7 +390,7 @@ gdb-multiarch vmlinux
 -monitor stdio
 
 # Or on separate window
--monitor telnet::4444,server,nowait
+-monitor telnet:127.0.0.1:4444,server,nowait
 
 # Then connect
 telnet localhost 4444
@@ -460,7 +462,7 @@ quit                 # Exit QEMU
 # List available machines
 qemu-system-arm -M help
 
-# Try more compatible machines
+# Select only a board supported by the supplied kernel/DTB
 -M versatilepb    # Instead of specific board
 -M virt           # Generic virtual machine
 ```
@@ -482,6 +484,12 @@ qemu-system-arm -M help
 ## Advanced Techniques
 
 ### Snapshot and Restore
+
+Internal `savevm` snapshots need snapshot-capable writable storage (typically
+qcow2); the raw images above do not provide this. Shut the guest down before
+converting a disk copy with `qemu-img convert -f raw -O qcow2 rootfs.ext4 rootfs.qcow2`,
+and boot that copy with `format=qcow2`. `-snapshot` alone is temporary disk writes,
+not a saved whole-VM checkpoint.
 
 ```bash
 # Boot QEMU
@@ -539,7 +547,7 @@ sudo chroot /mnt /usr/bin/qemu-arm-static /bin/sh
 ## Performance Optimization
 
 ```bash
-# Enable KVM (x86/x64 only)
+# Enable KVM only when host/guest architectures and selected machine support it
 -enable-kvm
 
 # Use VirtIO devices (faster than IDE)
@@ -576,7 +584,7 @@ qemu-system-mips \
   -kernel vmlinux \
   -hda rootfs.ext4 \
   -append "root=/dev/sda console=ttyS0 nokaslr" \
-  -netdev user,id=net0,hostfwd=tcp::8080-:80 \
+  -netdev user,id=net0,hostfwd=tcp:127.0.0.1:8080-:80 \
   -device e1000,netdev=net0 \
   -nographic \
   -m 256M
@@ -592,8 +600,8 @@ qemu-system-aarch64 \
   -kernel Image \
   -append "root=/dev/vda console=ttyAMA0" \
   -drive file=rootfs.ext4,if=virtio,format=raw \
-  -netdev user,id=net0,hostfwd=tcp::2222-:22 \
+  -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 \
   -device virtio-net-device,netdev=net0 \
   -nographic \
-  -gdb tcp::1234 -S
+  -gdb tcp:127.0.0.1:1234 -S
 ```

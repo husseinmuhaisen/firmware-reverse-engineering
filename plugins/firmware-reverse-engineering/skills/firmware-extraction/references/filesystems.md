@@ -23,13 +23,13 @@ unsquashfs -d output_dir squashfs_image.bin
 # Using sasquatch (for non-standard SquashFS)
 sasquatch squashfs_image.bin
 
-# Force specific version
-unsquashfs -d output_dir -force squashfs_image.bin
+# Overwrite existing output files (does not force a format version or repair corruption)
+unsquashfs -d output_dir -f squashfs_image.bin
 ```
 
 ### Troubleshooting
 - **Error: "unknown compression type"** → Use sasquatch instead of unsquashfs
-- **Error: "filesystem corruption"** → Try forcing extraction or use dd to extract from offset
+- **Error: "filesystem corruption"** → Verify offset and length; use a compatible extractor and record any unrecovered data
 - **Multiple SquashFS images** → Extract each separately by offset
 
 ### Common Issues
@@ -55,16 +55,12 @@ binwalk -e firmware.bin
 # Using jefferson (Python-based JFFS2 extractor)
 jefferson firmware.bin -d output_dir
 
-# Manual mounting (Linux only, requires root)
-modprobe mtdblock
-modprobe jffs2
-dd if=firmware.bin of=/tmp/jffs2.img bs=1 skip=OFFSET
-mkdir /tmp/jffs2_mount
-mount -t jffs2 -o loop /tmp/jffs2.img /tmp/jffs2_mount
+# Kernel mounting requires a provisioned MTD device in a disposable VM.
+# JFFS2 cannot be mounted directly with a loop device.
 ```
 
 ### Troubleshooting
-- **Endianness errors** → Use jefferson with `--big-endian` flag
+- **Endianness errors** → Jefferson detects byte order; verify image offset and node magic
 - **Corrupted nodes** → jefferson is more forgiving than mount
 - **Incomplete extraction** → May need to manually carve and reassemble
 
@@ -92,12 +88,9 @@ binwalk -e firmware.bin
 ubireader_extract_images -o output_dir firmware.bin
 ubireader_extract_files -o output_dir firmware.bin
 
-# Manual extraction (Linux with MTD/UBI support)
-modprobe nandsim first_id_byte=0x2c second_id_byte=0xda third_id_byte=0x90 fourth_id_byte=0x95
-modprobe ubi
-ubiattach -m 0 -d 0 /path/to/ubi.img
-mkdir /mnt/ubifs
-mount -t ubifs ubi0_0 /mnt/ubifs
+# Kernel alternative: populate a correctly sized emulated MTD, attach it to UBI,
+# then mount its volume in an isolated VM. ubiattach attaches an MTD device,
+# not an image file. Prefer ubi_reader for read-only file extraction.
 ```
 
 ### Troubleshooting
@@ -125,12 +118,12 @@ mount -t ubifs ubi0_0 /mnt/ubifs
 # Using binwalk
 binwalk -e firmware.bin
 
-# Using cramfsck
-cramfsck -x output_dir cramfs_image.bin
+# Using util-linux fsck.cramfs
+fsck.cramfs --extract=output_dir cramfs_image.bin
 
 # Manual mounting
 mkdir /tmp/cramfs_mount
-mount -t cramfs -o loop cramfs_image.bin /tmp/cramfs_mount
+mount -t cramfs -o loop,ro cramfs_image.bin /tmp/cramfs_mount
 ```
 
 ### Troubleshooting
@@ -154,7 +147,8 @@ mount -t cramfs -o loop cramfs_image.bin /tmp/cramfs_mount
 ### Extraction
 ```bash
 # Using unyaffs
-unyaffs yaffs2_image.bin output_dir/
+mkdir -p output_dir
+(cd output_dir && unyaffs ../yaffs2_image.bin)
 
 # Using binwalk (limited)
 binwalk -e firmware.bin
@@ -175,15 +169,15 @@ binwalk -e firmware.bin
 
 ### Characteristics
 - **Standard Linux**: Full-featured filesystems
-- **Compression**: ext4 can have inline compression
-- **Signature**: `0x53ef` at offset 0x438
+- **Compression**: Standard ext2/3/4 does not provide transparent file compression
+- **Signature**: bytes `53 ef` at offset 0x438 from the filesystem start (magic value 0xef53)
 - **Journaling**: ext3/ext4 have journals
 
 ### Extraction
 ```bash
 # Direct mounting (easiest)
 mkdir /tmp/ext_mount
-mount -o loop firmware.bin /tmp/ext_mount
+mount -o loop,ro,noload firmware.bin /tmp/ext_mount
 
 # Using debugfs (read-only)
 debugfs firmware.bin
@@ -194,14 +188,15 @@ debugfs firmware.bin
 
 # Copy entire filesystem
 mkdir output_dir
-mount -o loop firmware.bin /tmp/mnt
-cp -a /tmp/mnt/* output_dir/
+mkdir -p /tmp/mnt
+mount -o loop,ro,noload firmware.bin /tmp/mnt
+cp -a /tmp/mnt/. output_dir/
 umount /tmp/mnt
 ```
 
 ### Troubleshooting
 - **Journal errors** → Use `-o noload` to skip journal replay
-- **Orphaned inodes** → Run e2fsck to clean
+- **Orphaned inodes** → Inspect read-only with `e2fsck -n`; repair only a copy
 
 ### Common Issues
 - May require root for mounting
@@ -225,10 +220,9 @@ binwalk -e firmware.bin
 
 # Manual mounting
 mkdir /tmp/romfs_mount
-mount -t romfs -o loop romfs_image.bin /tmp/romfs_mount
+mount -t romfs -o loop,ro romfs_image.bin /tmp/romfs_mount
 
-# Using genromfs (for creating/extracting)
-genromfs -d output_dir -f romfs_image.bin
+# genromfs creates images; it is not an extractor and would overwrite its -f file.
 ```
 
 ### Troubleshooting
@@ -273,7 +267,7 @@ tar -xJvf archive.tar.xz
 | UBIFS | Yes (LZO/ZLIB) | Modern NAND flash | Hard | Moderate |
 | CramFS | Yes (ZLIB) | Legacy devices | Easy | Good |
 | YAFFS2 | No | Android/NAND | Medium | Limited |
-| ext2/3/4 | Optional | Linux systems | Easy | Excellent |
+| ext2/3/4 | No (standard format) | Linux systems | Easy | Excellent |
 | RomFS | No | Minimal systems | Easy | Good |
 | CPIO/TAR | External | Initramfs/packages | Easy | Excellent |
 
@@ -283,7 +277,7 @@ tar -xJvf archive.tar.xz
 2. **Check magic bytes** manually with hexdump/xxd
 3. **Look for filesystem names** in strings output
 4. **Entropy analysis** can reveal compressed sections
-5. **Try mounting** if Linux filesystem signature detected
+5. **Prefer userspace extractors**; kernel mounts belong in a disposable VM
 6. **Check manufacturer documentation** for hints
 
 ## Multi-Filesystem Firmware

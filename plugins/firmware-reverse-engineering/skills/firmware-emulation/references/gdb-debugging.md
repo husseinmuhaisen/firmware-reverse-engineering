@@ -7,13 +7,11 @@ Advanced debugging techniques for emulated firmware using GDB and gdb-multiarch.
 ### Install GDB Multi-Architecture
 
 ```bash
-# Install gdb-multiarch (supports all architectures)
+# Install gdb-multiarch (supports many architectures; confirm the installed build)
 sudo apt-get install gdb-multiarch
 
-# Or install architecture-specific GDB
-sudo apt-get install gdb-arm-none-eabi      # ARM bare-metal
-sudo apt-get install gdb-aarch64-linux-gnu  # AArch64
-sudo apt-get install gdb-mips-linux-gnu     # MIPS
+# Architecture-specific package names vary by distribution; gdb-multiarch
+# is the Debian/Ubuntu example used here.
 ```
 
 ### Starting QEMU with GDB Server
@@ -25,8 +23,8 @@ qemu-arm -g 1234 -L ./rootfs/ ./binary
 
 **System-mode:**
 ```bash
-qemu-system-arm -M versatilepb -kernel zImage ... -gdb tcp::1234 -S
-# -gdb tcp::1234 : Start GDB server on port 1234
+qemu-system-arm -M versatilepb -kernel zImage ... -gdb tcp:127.0.0.1:1234 -S
+# -gdb tcp:127.0.0.1:1234 : Start GDB server on port 1234
 # -S : Pause at startup (wait for GDB connection)
 ```
 
@@ -52,11 +50,11 @@ gdb-multiarch ./vmlinux
 
 ```gdb
 # Execution control
-continue (c)              # Continue execution
-step (s)                  # Step into (source level)
-next (n)                  # Step over (source level)
-stepi (si)                # Step one instruction
-nexti (ni)                # Step over one instruction
+continue                  # Alias: c; Continue execution
+step                      # Alias: s; Step into (source level)
+next                      # Alias: n; Step over (source level)
+stepi                     # Alias: si; Step one instruction
+nexti                     # Alias: ni; Step over one instruction
 finish                    # Run until function returns
 
 # Breakpoints
@@ -70,7 +68,7 @@ disable 1                 # Disable breakpoint 1
 enable 1                  # Enable breakpoint 1
 
 # Examination
-info registers (i r)      # Show all registers
+info registers            # Alias: i r; Show all registers
 info registers r0 r1      # Show specific registers (ARM)
 x/10x $sp                 # Examine 10 hex words at stack pointer
 x/10i $pc                 # Disassemble 10 instructions at PC
@@ -80,7 +78,7 @@ print/x $r0               # Print register in hex
 display $pc               # Auto-display PC after each step
 
 # Stack
-backtrace (bt)            # Show call stack
+backtrace                 # Alias: bt; Show call stack
 frame 0                   # Select stack frame
 info frame                # Show current frame details
 up                        # Move up stack
@@ -115,13 +113,14 @@ break *0x8000              # Address breakpoint
 
 # Examine ARM instructions
 x/10i $pc
-set disassembly-flavor arm
+# disassembly-flavor is an x86 option, not an ARM mode selector.
 disassemble main
 
 # Thumb mode handling
 # ARM can switch between ARM and Thumb modes
-# PC LSB indicates mode: 0=ARM, 1=Thumb
-print/x $pc                # Check mode
+# On A/R-profile ARM, CPSR.T (bit 5) is the current instruction state.
+# Function-pointer bit 0 encodes interworking; the displayed PC is usually aligned.
+print/x (($cpsr >> 5) & 1)  # 0=A32, 1=Thumb; M-profile uses xPSR.T instead
 
 # Step through Thumb code
 si
@@ -201,7 +200,7 @@ disassemble main
 
 ```bash
 # Start QEMU in paused state
-qemu-system-arm -M versatilepb -kernel zImage ... -gdb tcp::1234 -S
+qemu-system-arm -M versatilepb -kernel zImage ... -gdb tcp:127.0.0.1:1234 -S
 
 # In another terminal
 gdb-multiarch vmlinux
@@ -210,7 +209,7 @@ gdb-multiarch vmlinux
 (gdb) continue
 ```
 
-**Useful kernel breakpoints:**
+**Example kernel breakpoints (names vary by version; inspect `info functions`):**
 ```gdb
 break start_kernel          # Kernel entry
 break do_fork               # Process creation
@@ -221,26 +220,37 @@ break do_IRQ                # Interrupt handling
 
 ### 2. Userspace Debugging in System-Mode
 
-```gdb
-# After kernel boots and shell is available
-# Load userspace binary symbols
-(gdb) add-symbol-file /path/to/binary 0x00008000
+Run a matching target-architecture `gdbserver` inside the guest. The system
+QEMU stub exposes virtual CPUs, not a process-aware userspace debugger.
 
-# Set breakpoint in userspace
-(gdb) break main
-(gdb) continue
-
-# When userspace binary starts, GDB will break
+```bash
+# Inside guest, over an isolated network
+gdbserver :2345 /usr/sbin/httpd -f
+# On host
+gdb-multiarch ./rootfs/usr/sbin/httpd
 ```
+
+```gdb
+target remote 192.168.100.2:2345
+set sysroot ./rootfs
+break main
+continue
+```
+
+For stripped code, use verified instruction addresses and runtime load bias.
+Loading the same stripped file with `add-symbol-file` cannot restore lost names.
 
 ### 3. Watchpoints (Hardware/Software)
 
+Availability depends on the target stub: QEMU user-mode does not provide the
+same watchpoint support as full-system TCG. Verify support before relying on it.
+
 ```gdb
 # Watch memory location
-watch *0x8048000              # Break when value changes
+watch *(unsigned int *)0x8048000              # Break when value changes
 watch variable                # Watch variable
-rwatch *0x8048000             # Break on read
-awatch *0x8048000             # Break on read or write
+rwatch *(unsigned int *)0x8048000             # Break on read
+awatch *(unsigned int *)0x8048000             # Break on read or write
 
 # Watch with conditions
 watch variable if variable > 100
@@ -252,8 +262,8 @@ info watchpoints
 ### 4. Tracepoints and Commands
 
 ```gdb
-# Set tracepoint
-trace main
+# Remote tracepoints require target-agent support; QEMU stubs generally do
+# not provide it. Use breakpoint commands below for logging.
 
 # Execute commands at breakpoint
 break main
@@ -275,7 +285,7 @@ end
 ### 5. Scripting GDB
 
 **GDB Python scripting:**
-```python
+```gdb
 # In GDB
 python
 import gdb
@@ -314,29 +324,27 @@ gdb-multiarch -x debug.gdb ./binary
 
 ### 6. Core Dump Analysis
 
-```bash
-# Generate core dump from running QEMU
-# In QEMU monitor
-(qemu) dump-guest-memory core.dump
-
-# Analyze with GDB
-gdb-multiarch ./binary core.dump
-(gdb) backtrace
-(gdb) info registers
-(gdb) x/10i $pc
+```gdb
+# On a supported process-aware target, write a process core:
+generate-core-file process.core
+# Later, with the exact executable and target libraries:
+# gdb-multiarch ./binary process.core
 ```
 
-### 7. Remote Process Attach (User-Mode)
+QEMU monitor `dump-guest-memory` creates a full guest memory dump, not a normal
+userspace process core. Analyze it with the matching kernel symbols and a
+kernel-dump workflow; opening it with an arbitrary userspace binary is incorrect.
+Support for process core generation varies by remote stub.
+
+### 7. Remote Process Attach
+
+Attaching host GDB to the QEMU PID debugs the emulator, not the foreign process.
+Start QEMU user-mode with its GDB stub, or use gdbserver within a full-system guest:
 
 ```bash
-# For already-running process in QEMU
-# Start QEMU normally
-qemu-arm -L ./rootfs/ ./binary &
-PID=$!
-
-# Attach GDB to QEMU process
-gdb-multiarch ./binary
-(gdb) attach $PID
+qemu-arm -g 1234 -L ./rootfs/ ./binary
+# In another terminal
+gdb-multiarch ./binary -ex 'target remote localhost:1234'
 ```
 
 ## Debugging Complex Issues
@@ -354,45 +362,45 @@ x/20x $sp
 si
 
 # Watch for stack corruption
-watch *($sp + 100)  # Watch stack region
+watch *(unsigned int *)($sp + 100)  # Watch stack region
 
 # Check return address
-x/x $sp             # ARM: look for lr on stack
+info registers lr sp
+# Find the saved LR from the function prologue/unwind info; it need not be at SP.
 ```
 
 ### Format String Vulnerabilities
 
 ```gdb
-# Break at printf/sprintf
+# AAPCS32 integer argument convention, not AArch64:
 break printf
-break sprintf
-
-# Examine format string argument
 commands
-  x/s $r0  # ARM: first argument
+  x/s $r0  # printf(format, ...)
   continue
 end
+break sprintf
+commands
+  x/s $r1  # sprintf(destination, format, ...)
+  continue
+end
+# A variable format requires input-origin verification; %n is not automatically a bug.
 
-# Check for %n or excessive %s
 ```
 
 ### Heap Corruption
 
 ```gdb
-# Break at malloc/free
+# Manual AAPCS32 malloc inspection:
 break malloc
+continue
+print/u $r0  # Requested size at entry
+finish
+print/x $r0  # Returned pointer after finish
+# Record entry/return pairs; use Python FinishBreakpoint for automation.
+# A resume command inside a GDB commands list ends that list, so commands
+# after finish in such a list do not automatically execute.
 break free
 
-# Log allocations
-commands
-  silent
-  printf "malloc(%d) = ", $r0
-  finish
-  printf "%p\n", $r0
-  continue
-end
-
-# Watch for double-free or use-after-free
 ```
 
 ### Race Conditions (Multi-threaded)
@@ -428,7 +436,7 @@ set scheduler-locking off  # All threads run
 # 1. In Ghidra: Debugger -> Debug -> Connect to gdb
 # 2. Configure gdb:
 #    - Launch: gdb-multiarch
-#    - Connect: gdb://localhost:1234
+#    - In the GDB terminal: target remote localhost:1234
 # 3. Ghidra provides decompiler view with debugging
 ```
 
@@ -439,7 +447,7 @@ set scheduler-locking off  # All threads run
 r2 -D gdb gdb://localhost:1234
 
 # Or use r2's own debug mode with QEMU
-r2 -d qemu-arm -L ./rootfs/ ./binary
+# A native -d attach debugs QEMU itself; use its GDB endpoint above.
 ```
 
 ## GDB Initialization File
@@ -449,11 +457,8 @@ Create `~/.gdbinit` for persistent settings:
 ```gdb
 # ~/.gdbinit
 
-# Set architecture
-set architecture arm
-
-# Syntax preference
-set disassembly-flavor intel
+# Let the loaded ELF/remote target select architecture.
+# Use set disassembly-flavor intel only in x86 sessions.
 
 # Pagination
 set pagination off
@@ -467,7 +472,7 @@ set print pretty on
 set print array on
 
 # Auto-load safe path (for .gdbinit in project dirs)
-set auto-load safe-path /
+add-auto-load-safe-path /absolute/path/to/reviewed/debug-scripts
 
 # Custom commands
 define hook-stop
@@ -559,7 +564,8 @@ gdb-multiarch instead of gdb
 ```gdb
 # Load symbols manually
 (gdb) file ./binary
-(gdb) add-symbol-file ./binary 0x8000
+# add-symbol-file needs an unstripped symbol file and the actual .text address.
+# The runtime load bias must be calculated; 0x8000 is not a generic address.
 
 # Or use unstripped version if available
 (gdb) file ./binary.unstripped
@@ -571,11 +577,12 @@ gdb-multiarch instead of gdb
 
 **Solution:**
 ```gdb
-# Disable ASLR in QEMU kernel command line
--append "nokaslr ..."
+# nokaslr in the kernel command line affects kernel ASLR, not userspace ASLR.
+# For userspace, inspect the process mappings and relocate breakpoints.
 
 # Check if code is actually reached
-(gdb) break *0x0   # Break at entry
+# Obtain the actual entry from ELF metadata and runtime mappings; it is not 0.
+(gdb) info files
 (gdb) continue
 (gdb) x/10i $pc    # See where we are
 
@@ -598,14 +605,14 @@ gdb-multiarch instead of gdb
 
 ## Best Practices
 
-1. **Use gdb-multiarch** - Handles all architectures
+1. **Use gdb-multiarch** - Confirm support for the target architecture
 2. **Load symbols before connecting** - `file ./binary` first
 3. **Start QEMU with -S** - Pause at start for kernel debugging
 4. **Use .gdbinit** - Automate repetitive commands
 5. **Learn Python scripting** - Automate complex debugging tasks
 6. **Use GDB extensions** - pwndbg/GEF enhance productivity significantly
 7. **Keep GDB updated** - Newer versions support more architectures/features
-8. **Save sessions** - Use `logging on` to record debug sessions
+8. **Save sessions** - Use `set logging enabled on` to record debug sessions
 9. **Create debug scripts** - Automate common debugging workflows
 10. **Combine with other tools** - IDA/Ghidra + GDB is powerful
 

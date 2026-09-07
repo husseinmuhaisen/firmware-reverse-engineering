@@ -6,7 +6,7 @@ Guide for identifying and handling encrypted, compressed, or obfuscated firmware
 
 ### Entropy Analysis
 
-High entropy (close to 8.0) indicates encryption or strong compression.
+High entropy (close to 8 bits/byte) is compatible with encryption or compression; it proves neither.
 
 ```bash
 # Using binwalk entropy analysis
@@ -16,14 +16,12 @@ binwalk -E firmware.bin
 ent firmware.bin
 
 # Visual entropy plot
-binwalk -E -J firmware.bin  # Creates PNG plot
+binwalk -E firmware.bin  # Creates PNG plot
 ```
 
-**Interpretation:**
-- **Entropy ~8.0**: Encrypted or compressed
-- **Entropy ~7.0-7.5**: Compressed data
-- **Entropy ~5.0-6.0**: Plain text or structured data
-- **Entropy <5.0**: Highly structured (code, sparse data)
+**Interpretation:** High values indicate a near-uniform byte distribution;
+lower values indicate more repetition. No fixed entropy threshold distinguishes
+code, compression or encryption. Compare windows and verify candidate formats.
 
 ### Signature Scanning
 
@@ -58,7 +56,7 @@ xxd -l 512 firmware.bin
 
 #### Indicators
 - High entropy throughout
-- Fixed block alignment (16 bytes for AES)
+- ECB/CBC ciphertext is block-aligned (16 bytes); CTR/GCM payloads need not be
 - May have IV (Initialization Vector) at start
 - References to AES in strings
 
@@ -98,7 +96,7 @@ objdump -d bootloader.elf | grep -A 20 -i aes
 **Most common in**: Cheap IoT devices, some embedded systems
 
 #### Indicators
-- Medium-high entropy (6.5-7.5)
+- Single-byte XOR preserves Shannon entropy; entropy cannot detect it
 - Repeating patterns in byte differences
 - Magic bytes are corrupted predictably
 
@@ -134,6 +132,8 @@ For multi-byte XOR:
 def xor_decrypt(data, key):
     """Decrypt with multi-byte XOR key"""
     key_bytes = bytes.fromhex(key) if isinstance(key, str) else key
+    if not key_bytes:
+        raise ValueError('XOR key must not be empty')
     return bytes([data[i] ^ key_bytes[i % len(key_bytes)] for i in range(len(data))])
 
 # Example usage
@@ -142,7 +142,7 @@ with open('firmware.bin', 'rb') as f:
 
 # Try known patterns (e.g., if expecting SquashFS)
 for key_byte in range(256):
-    if encrypted[0] ^ key_byte == 0x68:  # 'h' in hsqs
+    if encrypted and encrypted[0] ^ key_byte == 0x68:  # 'h' in hsqs
         key = bytes([key_byte])
         decrypted = xor_decrypt(encrypted, key)
         if decrypted[:4] == b'hsqs':
@@ -207,7 +207,7 @@ dd if=firmware.bin bs=1 skip=OFFSET | gunzip > decompressed.bin
 ### LZMA/XZ
 
 ```bash
-# Check for LZMA magic (0xFD 0x37 0x7A 0x58 0x5A)
+# XZ magic is fd 37 7a 58 5a 00; legacy .lzma has a different header
 xxd firmware.bin | grep "fd37 7a58 5a"
 
 # Extract XZ
@@ -224,7 +224,7 @@ lzma -dc firmware.bin > firmware_decompressed.bin
 ### Custom/Proprietary Compression
 
 #### Detection
-- High entropy (7.0-7.5) but not 8.0
+- Entropy may be high, including values near 8; use format/code evidence
 - No standard compression headers
 - May have small header with size/checksum
 
@@ -247,7 +247,9 @@ binwalk firmware.bin
 # Manual search for filesystem signatures with offset tolerance
 hexdump -C firmware.bin | grep -E "68 73 71 73|19 85|53 ef"  # hsqs, JFFS2, ext
 
-# Try extracting with dd at found offset
+# Hexdump searches can miss signatures split across lines. The ext magic is
+# 0x438 bytes after the filesystem start; subtract that before carving.
+# Try extracting with dd at the verified filesystem offset
 dd if=firmware.bin of=extracted.bin bs=1 skip=OFFSET
 ```
 
@@ -279,8 +281,8 @@ EOF
 Firmware may have unusual padding that confuses tools.
 
 ```bash
-# Remove null padding
-dd if=firmware.bin of=firmware_clean.bin bs=1 conv=notrunc
+# Do not delete internal zero bytes: they may be meaningful data.
+# conv=notrunc only preserves an existing output file; it does not strip padding.
 
 # Skip initial padding
 dd if=firmware.bin of=firmware_clean.bin bs=1 skip=OFFSET
@@ -320,8 +322,9 @@ xxd -l 512 decrypted.bin
 ```python
 #!/usr/bin/env python3
 """
-Generic firmware decryption script
-Attempts multiple common decryption methods
+Candidate AES-ECB/CBC probe, not a general firmware decryptor.
+Install PyCryptodome. CBC assumes a prepended IV only as a hypothesis;
+confirm mode, IV, key derivation, padding and authentication in updater code.
 """
 
 from Crypto.Cipher import AES
@@ -336,27 +339,20 @@ def try_aes_decrypt(data, key, mode='ECB'):
             iv = data[:16]  # Assume IV at start
             cipher = AES.new(key, AES.MODE_CBC, iv)
             data = data[16:]
+        else:
+            raise ValueError('Unsupported probe mode')
         
         decrypted = cipher.decrypt(data)
         return decrypted
-    except Exception as e:
+    except ValueError:
         return None
 
-def check_valid_firmware(data):
-    """Check if decrypted data looks like valid firmware"""
-    # Check for common signatures
-    signatures = [
-        b'hsqs',  # SquashFS
-        b'\x19\x85',  # JFFS2
-        b'\x53\xef',  # ext2/3/4 (at offset 0x438)
-        b'UBI#',  # UBIFS
-        b'\x28\xcd\x3d\x45',  # CramFS
-    ]
-    
-    for sig in signatures:
-        if sig in data[:1024]:
-            return True
-    return False
+def check_firmware_candidate(data):
+    """Recognize headers at expected offsets; this does not validate decryption."""
+    at_start = (b'hsqs', b'sqsh', b'\x19\x85', b'\x85\x19',
+                b'UBI#', b'\x31\x18\x10\x06',
+                b'\x45\x3d\xcd\x28', b'\x28\xcd\x3d\x45')
+    return data.startswith(at_start) or data[0x438:0x43a] == b'\x53\xef'
 
 def main():
     if len(sys.argv) < 3:
@@ -376,14 +372,14 @@ def main():
         print(f"Trying AES-{mode}...")
         decrypted = try_aes_decrypt(encrypted, key, mode)
         
-        if decrypted and check_valid_firmware(decrypted):
+        if decrypted and check_firmware_candidate(decrypted):
             output = f"decrypted_{mode}.bin"
             with open(output, 'wb') as f:
                 f.write(decrypted)
-            print(f"Success! Decrypted firmware saved to {output}")
-            return
+            print(f"Header candidate saved to {output}")
+            print("Verify full parsing, lengths/checksums and any authentication tag.")
     
-    print("Decryption failed or no valid firmware signatures found")
+    print("Probe complete; absent header matches do not rule out a correct key.")
 
 if __name__ == '__main__':
     main()
@@ -399,7 +395,7 @@ if __name__ == '__main__':
 
 ### Decryption Tools
 - **OpenSSL** - CLI crypto operations
-- **Python cryptography/PyCrypto** - Scripting crypto operations
+- **Python cryptography/PyCryptodome** - Scripting crypto operations
 - **firmware-mod-kit** - Includes some decryption tools
 - **unblob** - Modern firmware extraction with crypto support
 
@@ -408,32 +404,14 @@ if __name__ == '__main__':
 - **radare2** - Script-friendly RE tool
 - **QEMU + GDB** - Dynamic analysis of decryption
 
-## Common Vendor-Specific Cases
+## Vendor-Specific Cases
 
-### TP-Link
-- Often uses simple XOR or unencrypted
-- Check GPL source for encryption details
-- Some models: AES with hardcoded keys
-
-### D-Link
-- Mix of encryption methods
-- Older models: often unencrypted or simple obfuscation
-- Newer models: AES with keys in bootloader
-
-### Netgear
-- Various encryption across product lines
-- Check update utilities for keys
-- Some models store keys in TRX header
-
-### Ubiquiti
-- Usually uses standard compression (gzip/LZMA)
-- Minimal encryption on most models
-- Kernel/rootfs often easily extractable
-
-### Cisco
-- Enterprise gear: strong encryption
-- Consumer gear: varies widely
-- Check for signed firmware requirements
+For TP-Link, D-Link, Netgear, Ubiquiti, Cisco and other vendors, determine the
+exact model, hardware revision and firmware build before choosing a decoder.
+A vendor name does not imply XOR, AES, a key location or absence of encryption.
+Search model-specific advisories, GPL sources and the matching updater/bootloader.
+TRX headers describe container metadata; do not assume they contain AES keys.
+Record the source and verification for any reused key or decoding procedure.
 
 ## When All Else Fails
 

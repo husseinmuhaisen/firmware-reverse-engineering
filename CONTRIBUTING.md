@@ -15,11 +15,11 @@ python3 -m venv .venv
 
 On Windows, use `.venv\Scripts\python.exe` in place of `.venv/bin/python`.
 
-The checks validate catalogs, plugin manifests, skill discovery metadata, local references, Python syntax, and the original content hashes. They do not execute firmware or prove the correctness of Ghidra scripts. See [compatibility testing](docs/compatibility.md#local-testing) for the host CLI checks.
+The checks validate catalogs, plugin manifests, skill discovery metadata, local references, Python syntax, the approved content hashes, Python example syntax, CVSS vectors, and AES/header examples. Separate runtime checks execute the Ghidra scripts and Binwalk against benign fixtures. See [compatibility testing](docs/compatibility.md#local-testing) for the host CLI checks.
 
 ## Content baseline
 
-`tests/skill-content-baseline.json` records the SHA-256 digest of every original skill file from commit `e47b88bc96f2e269f71acfc702c0699f6593581b`, with a destination prefix for the new layout. This makes byte-preserving moves verifiable without depending on Git rename heuristics.
+`tests/skill-content-baseline.json` records the SHA-256 digest of each approved skill file. The initial packaging commit preserved all 25 original files from `e47b88bc96f2e269f71acfc702c0699f6593581b`; the technical-fix commit updates the affected entries and adds the previously missing script. Approval and validation are recorded in `docs/release-readiness.md`.
 
 If a technical change is approved, include that approval in the pull request and update only its affected baseline entries. The baseline is a regression check, not a replacement for human review. CODEOWNERS records the maintainer; required code-owner review must be enabled separately in GitHub settings if desired.
 
@@ -27,4 +27,4 @@ If a technical change is approved, include that approval in the pull request and
 
 Explain the problem, the resulting behavior, what was tested, and any remaining limitations. Do not describe a parser check as an end-to-end skill evaluation. For technical fixes, include a meaningful reproducer and verification in the relevant tool runtime.
 
-For releases, keep both plugin manifest versions aligned. After approval, bump them together and refresh the marketplace before checking the new installation. Run `python3 tools/validate_repo.py --release` before creating a release. Select and add the license, resolve the documented blockers, and complete the runtime checks first.
+For releases, keep both plugin manifest versions aligned. After approval, bump them together and refresh the marketplace before checking the new installation. Run `python3 tools/validate_repo.py --release` before creating a release. Keep the Apache-2.0 license and NOTICE in both the root and packaged plugin, and rerun relevant runtime checks first.

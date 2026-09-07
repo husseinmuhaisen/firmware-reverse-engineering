@@ -30,5 +30,6 @@
       "Inspect an extracted firmware binary in Ghidra.",
       "Draft a report from my firmware assessment findings."
     ]
-  }
+  },
+  "license": "Apache-2.0"
 }

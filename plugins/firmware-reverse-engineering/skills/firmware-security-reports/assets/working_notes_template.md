@@ -1,5 +1,9 @@
 # Firmware Assessment Working Notes
 
+> Template: example findings, scores and evidence below are illustrative. Replace
+> them with verified assessment data and remove unused sections before delivery.
+
+
 **Product:** [PRODUCT_NAME]  
 **Version:** [VERSION]  
 **Analyst:** [NAME]  
@@ -78,7 +82,7 @@ Several interesting binaries in /usr/sbin/:
 ```
 httpd binary analysis:
 - Not stripped
-- No PIE (ASLR disabled)
+- No PIE; userspace ASLR policy has not been checked
 - Stack canaries present
 - Several vulnerable CGI scripts identified
 
@@ -240,9 +244,9 @@ Response: uid=0(root) gid=0(root)
 
 **Result:**
 ```
-✅ Remote code execution as root
-✅ Reverse shell established
-✅ Full device compromise
+Remote code execution as root
+Reverse shell established
+Full device compromise
 ```
 
 **Exploit Code:**
@@ -262,9 +266,9 @@ print(r.text)  # uid=0(root)
 
 **Result:**
 ```
-✅ Bypassed authentication
-✅ Admin session established
-✅ Access to all functionality
+Bypassed authentication
+Admin session established
+Access to all functionality
 ```
 
 ---

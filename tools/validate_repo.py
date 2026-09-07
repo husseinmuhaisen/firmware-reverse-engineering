@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check packaging and preserved content without executing analysis workflows."""
+"""Check packaging and the approved content baseline without executing analysis workflows."""
 
 from __future__ import annotations
 
@@ -37,9 +37,11 @@ def validate(root: Path) -> tuple[list[str], list[str]]:
     try:
         claude = read_json(plugin / ".claude-plugin/plugin.json")
         codex = read_json(plugin / ".codex-plugin/plugin.json")
-        for field in ("name", "version", "description", "author", "repository", "skills"):
+        for field in ("name", "version", "description", "author", "repository", "skills", "license"):
             if not claude.get(field) or claude.get(field) != codex.get(field):
                 errors.append(f"Plugin manifests must agree on {field}")
+        if claude.get("license") != "Apache-2.0":
+            errors.append("Plugin license must be Apache-2.0")
         if claude.get("name") != PLUGIN:
             errors.append("Plugin name does not match its directory")
         if not re.fullmatch(r"\d+\.\d+\.\d+", str(claude.get("version", ""))):
@@ -84,7 +86,7 @@ def validate(root: Path) -> tuple[list[str], list[str]]:
             and "__pycache__" not in p.parts and p.suffix != ".pyc"
         }
         for path in sorted(set(expected_files) - set(actual_files)):
-            errors.append(f"Original skill file missing: {path}")
+            errors.append(f"Approved skill file missing: {path}")
         for path in sorted(set(actual_files) - set(expected_files)):
             errors.append(f"Skill file added without a baseline entry: {path}")
         for path in sorted(set(actual_files) & set(expected_files)):
@@ -128,8 +130,11 @@ def validate(root: Path) -> tuple[list[str], list[str]]:
                 if not (path.parent / unquote(url.path)).exists():
                     errors.append(f"Broken documentation link in {path.relative_to(root)}: {target}")
 
-        if not (root / "LICENSE").is_file():
-            blockers.append("No LICENSE file: the maintainer must select a license before release")
+        for name in ("LICENSE", "NOTICE"):
+            if not (root / name).is_file() or not (plugin / name).is_file():
+                blockers.append(f"Missing {name}: ship it in both repository and plugin")
+            elif (root / name).read_bytes() != (plugin / name).read_bytes():
+                errors.append(f"Repository and plugin {name} must match")
     except (OSError, ValueError, TypeError, KeyError, AttributeError, SyntaxError, yaml.YAMLError) as exc:
         errors.append(f"Validation could not complete: {exc}")
     return errors, blockers

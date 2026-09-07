@@ -8,9 +8,9 @@ Firmadyne is an automated framework for emulating and analyzing Linux-based firm
 
 **Strengths:**
 - Automated extraction and emulation
-- Large database of pre-analyzed firmware
+- Published experimental datasets (not a bundled ready-to-run firmware database)
 - Network emulation built-in
-- Web interface for interaction
+- Access to firmware-provided web services when emulation succeeds
 
 **Limitations:**
 - Primarily supports Linux-based firmware
@@ -19,6 +19,14 @@ Firmadyne is an automated framework for emulating and analyzing Linux-based firm
 - Requires significant setup
 
 ## Installation
+
+These frameworks carry legacy dependencies, including a Python Binwalk API.
+Use their documented environment in a disposable VM and record the checked-out
+commit; installing the current Rust Binwalk CLI does not satisfy that API.
+Follow the upstream [Firmadyne](https://github.com/firmadyne/firmadyne#setup)
+and [FirmAE](https://github.com/pr0v3rbs/FirmAE#installation) instructions before
+running the workflow. Do not assume their installers support a current host OS.
+
 
 ### Prerequisites
 
@@ -30,7 +38,8 @@ sudo apt-get install busybox-static fakeroot git dmsetup kpartx netcat-openbsd n
 sudo apt-get install postgresql
 
 # Install binwalk
-sudo apt-get install binwalk
+# See firmware-extraction for standalone Binwalk 3.1.0; automated frameworks
+# may instead require the legacy Python Binwalk API in a separate environment.
 
 # Python dependencies
 pip3 install python-magic
@@ -44,10 +53,7 @@ git clone --recursive https://github.com/firmadyne/firmadyne.git
 cd firmadyne
 
 # Download pre-built binaries
-cd ./binaries
-wget https://github.com/firmadyne/binaries/releases/download/v1.0/binaries.tar.gz
-tar -xzvf binaries.tar.gz
-cd ..
+./download.sh
 
 # Build database
 sudo -u postgres createuser -P firmadyne  # Password: firmadyne
@@ -57,7 +63,7 @@ sudo -u postgres createdb -O firmadyne firmware
 sudo -u postgres psql -d firmware < ./database/schema
 
 # Configure settings
-cp firmadyne.config.example firmadyne.config
+# Edit the existing firmadyne.config (there is no required .example copy)
 # Edit firmadyne.config:
 # - Set FIRMWARE_DIR to absolute path
 # - Configure PostgreSQL credentials
@@ -65,11 +71,11 @@ cp firmadyne.config.example firmadyne.config
 
 ### FirmAE Setup (Improved Firmadyne)
 
-FirmAE is an enhanced version of Firmadyne with better success rates.
+FirmAE extends Firmadyne with additional emulation workarounds; results depend on the firmware corpus.
 
 ```bash
 # Clone FirmAE
-git clone https://github.com/pr0v3rbs/FirmAE
+git clone --recursive https://github.com/pr0v3rbs/FirmAE
 cd FirmAE
 
 # Install
@@ -95,8 +101,8 @@ cd /path/to/firmadyne
 # Parameters:
 # -b BRAND: Brand name (Netgear, TP-Link, etc.)
 # -sql: PostgreSQL host
-# -np: No password for PostgreSQL
-# -nk: Don't check kernel version
+# -np: Disable parallel extraction
+# -nk: Do not extract the kernel (filesystem-only pass)
 # images: Output directory
 
 # This creates database entry and extracts filesystem
@@ -125,10 +131,10 @@ sudo ./scratch/1/run.sh
 # Wait ~60 seconds after starting run.sh
 
 # Check for network
-sudo ./analyses/snmpwalk.sh 1
+./analyses/snmpwalk.sh 192.168.0.100
 
 # Web interface check
-./analyses/webAccess.sh 1 8080  # Port depends on firmware
+./analyses/webAccess.py 1 192.168.0.100 web.log  # Use the discovered guest IP
 
 # Try to connect
 curl http://192.168.1.1/  # Default IP, varies by firmware
@@ -167,11 +173,13 @@ cd /path/to/FirmAE
 # Run automated analysis
 sudo ./run.sh -r Netgear firmware.bin
 
-# Parameters:
-# -r BRAND: Router brand
-# -c: Continue from previous run
-# -a ARCH: Specify architecture (arm, mips, mipsel, x86)
-# -d: Debug mode (more verbose)
+# Syntax: ./run.sh MODE BRAND FIRMWARE (exactly one mode)
+# -r / --run: run emulation without automatic exit
+# -c / --check: check network/web reachability, then exit
+# -a / --analyze: run vulnerability analyses, then exit
+# -d / --debug: debug emulation
+# -b / --boot: debug kernel boot
+
 ```
 
 ### FirmAE Workflow
@@ -204,17 +212,18 @@ curl http://192.168.0.1
 ### Advanced FirmAE Options
 
 ```bash
-# Continue from failed run
-sudo ./run.sh -c <IMAGE_ID>
+# Check reachability
+sudo ./run.sh -c Netgear firmware.bin
 
-# Specify architecture
-sudo ./run.sh -a arm -r Netgear firmware.bin
+# Run analyses
+sudo ./run.sh -a Netgear firmware.bin
 
-# Debug mode
-sudo ./run.sh -d -r Netgear firmware.bin
+# Debug emulation (one mode only)
+sudo ./run.sh -d Netgear firmware.bin
 
-# Skip analysis phases
-sudo ./run.sh --skip-analysis -r Netgear firmware.bin
+# Debug kernel boot
+sudo ./run.sh -b Netgear firmware.bin
+
 ```
 
 ## Analyzing Running Firmware
@@ -306,12 +315,15 @@ strings vmlinux | grep "Linux version"
 
 # Download matching kernel
 wget https://cdn.kernel.org/pub/linux/kernel/v4.x/linux-4.14.tar.xz
+tar xf linux-4.14.tar.xz
+cd linux-4.14
+# Historical example only: select a researched version/board configuration.
 
 # Use firmware's config if available
-cp /path/to/extracted/.config linux-4.14/.config
+cp /path/to/extracted/.config .config
 
 # Or use Firmadyne's config as base
-cp /path/to/firmadyne/kernel/config/config.arm linux-4.14/.config
+cp /path/to/firmadyne/kernel-v4.1/config.armel .config  # Match the actual source checkout
 
 # Enable required drivers
 make ARCH=arm menuconfig
@@ -373,7 +385,7 @@ SELECT * FROM object_to_image WHERE iid = 1;
 SELECT * FROM brand WHERE name LIKE '%Netgear%';
 
 # Search for specific files across all firmware
-SELECT DISTINCT(filename) FROM object WHERE filename LIKE '%passwd%';
+SELECT DISTINCT(filename) FROM object_to_image WHERE filename LIKE '%passwd%';
 ```
 
 ## Automated Vulnerability Testing
@@ -393,7 +405,7 @@ nmap --script vuln -p 80,443,23,21 192.168.0.1
 sqlmap -u "http://192.168.0.1/login.php" --forms --batch
 
 # Check for common vulns
-curl http://192.168.0.1/../../etc/passwd  # Directory traversal
+curl --path-as-is http://192.168.0.1/../../etc/passwd  # Directory traversal
 curl http://192.168.0.1/cgi-bin/test.cgi?cmd=ls  # Command injection
 ```
 
@@ -422,7 +434,7 @@ binwalk -e firmware.bin
 
 # Or use firmware-extraction skill
 # Then manually create tar.gz for Firmadyne
-cd _firmware.bin.extracted/squashfs-root
+cd /path/to/extracted/rootfs
 tar czf ../../image.tar.gz .
 ```
 
@@ -435,7 +447,7 @@ psql -U firmadyne -d firmware -h 127.0.0.1
 UPDATE image SET arch = 'armel' WHERE id = 1;
 
 # Or for FirmAE
-./run.sh -a arm firmware.bin
+# No architecture override flag in run.sh; inspect scripts/getArch.py and logs.
 ```
 
 ### Issue: Firmware won't boot
@@ -492,7 +504,7 @@ ls /etc/rc.d/
 -m 512M  # Increase from default 256M
 
 # Use KVM if host and guest arch match
-# Edit run.sh: Add -enable-kvm (x86/x64 only)
+# Edit run.sh: Add -enable-kvm (requires host/guest and machine support)
 
 # Reduce unnecessary services
 # Inside firmware, disable unneeded daemons
@@ -503,13 +515,14 @@ ls /etc/rc.d/
 ### Extract running filesystem
 
 ```bash
-# While firmware is running
-# From host, mount QEMU image
+# Shut down emulation first and work from an image copy.
+# Mounting a guest disk concurrently with the guest can corrupt it.
+# Use the mapper name printed by kpartx; loop0p1 below is only an example.
 sudo kpartx -av scratch/1/image.raw
 sudo mount /dev/mapper/loop0p1 /mnt
 
 # Copy filesystem
-sudo cp -a /mnt/* /tmp/running_firmware/
+sudo cp -a /mnt/. /tmp/running_firmware/
 
 # Unmount
 sudo umount /mnt
@@ -534,7 +547,7 @@ curl http://192.168.0.1/cgi-bin/admin.cgi?exploit
 
 ## Best Practices
 
-1. **Start with FirmAE** - Better success rate than Firmadyne
+1. **Try FirmAE** - Additional workarounds may help supported firmware
 2. **Save work directories** - Don't delete scratch/<ID> until done
 3. **Document IDs** - Keep track of which image ID is which firmware
 4. **Network isolation** - Use separate network namespace or VM for emulation
@@ -550,7 +563,7 @@ curl http://192.168.0.1/cgi-bin/admin.cgi?exploit
 | Aspect | Firmadyne | FirmAE | Manual QEMU |
 |--------|-----------|--------|-------------|
 | Setup | Complex | Moderate | Simple |
-| Success Rate | 60-70% | 80-90% | 95%+ (with effort) |
+| Compatibility | Supported Linux images | Supported Linux images with additional workarounds | Requires a supported machine/kernel/devices |
 | Automation | High | Very High | Low |
 | Flexibility | Low | Moderate | Very High |
 | Learning Curve | Moderate | Low | High |

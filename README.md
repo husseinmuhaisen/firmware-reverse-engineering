@@ -4,7 +4,7 @@ Five agent skills for firmware extraction, static analysis, Ghidra reverse engin
 
 The collection packages the existing workflows, references, templates, and Ghidra scripts for Claude Code and Codex. Installing it makes the instructions available to your agent; install the analysis tools separately.
 
-**Release status:** packaging is prepared for review. Known technical issues and the license decision remain open in [docs/release-readiness.md](docs/release-readiness.md). This is not yet an end-to-end validated firmware analysis environment.
+**Validation:** Claude Code and Codex packaging/discovery checks, Ghidra script regressions, and selected extraction/reporting checks are included. See [tested versions and limitations](docs/release-readiness.md). Firmware emulation remains target-specific.
 
 ## Skills
 
@@ -72,8 +72,8 @@ For manual installation paths, updates, removal, and tool requirements, see [doc
 | `.claude-plugin/marketplace.json` | Claude Code marketplace catalog. |
 | `.agents/plugins/marketplace.json` | Codex marketplace catalog. |
 | `plugins/firmware-reverse-engineering/` | One self-contained plugin with manifests for both hosts. |
-| `plugins/firmware-reverse-engineering/skills/` | The five original skill directories and all supporting files. |
-| `tools/` and `tests/` | Packaging checks and a content preservation baseline. |
+| `plugins/firmware-reverse-engineering/skills/` | Five skills with references, templates and four Ghidra scripts. |
+| `tools/` and `tests/` | Packaging/runtime checks and an approved content baseline. |
 | `docs/` | Compatibility instructions and release findings. |
 
 The old top-level skill directories have moved under the plugin. Update any local symlinks or installation paths that pointed at the old layout.
@@ -84,4 +84,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Changes to skill instructions, reference
 
 ## License
 
-No license has been selected yet. The maintainer must choose the license before this is advertised as an open-source release.
+Licensed under the [Apache License 2.0](LICENSE), matching the root license used by [SpecterOps/skills](https://github.com/SpecterOps/skills/blob/main/LICENSE). See [NOTICE](NOTICE) for attribution.

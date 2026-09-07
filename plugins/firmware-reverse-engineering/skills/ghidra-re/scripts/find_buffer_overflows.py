@@ -1,8 +1,20 @@
+# @runtime Jython
+# @category Firmware
 # find_buffer_overflows.py
 """
 Identify potential buffer overflow vulnerabilities
 Focuses on dangerous functions and unbounded operations
 """
+
+from ghidra.program.model.listing import CodeUnit
+
+from ghidra.util.task import TaskMonitor
+
+# Nested/headless invocations can have no monitor; use the active one if supplied.
+monitor = monitor or getControls().getMonitor() or TaskMonitor.DUMMY
+
+
+listing = currentProgram.getListing()
 
 DANGEROUS_FUNCTIONS = {
     'strcpy': 'Unbounded string copy',
@@ -15,7 +27,7 @@ DANGEROUS_FUNCTIONS = {
     'strncat': 'Off-by-one risks',
 }
 
-TAINTED_SOURCES = [
+INPUT_SOURCES = [
     'recv', 'read', 'fgets', 'getenv', 'scanf'
 ]
 
@@ -28,15 +40,14 @@ def find_dangerous_calls():
     print("=== Scanning for Dangerous Function Calls ===\n")
     
     for func in fm.getFunctions(True):
-        called = get_called_functions(func)
-        
-        for call in called:
+        monitor.checkCancelled()
+        for location, call in get_call_sites(func):
             if call in DANGEROUS_FUNCTIONS:
                 results.append({
                     'caller': func,
                     'dangerous_call': call,
                     'reason': DANGEROUS_FUNCTIONS[call],
-                    'location': find_call_site(func, call)
+                    'location': location
                 })
     
     # Report findings
@@ -54,8 +65,8 @@ def find_dangerous_calls():
             
             # Add comment at call site
             if vuln['location']:
-                setEOLComment(vuln['location'],
-                    "DANGEROUS: {}".format(vuln['reason']))
+                append_eol_comment(vuln['location'],
+                    "REVIEW: {}".format(vuln['reason']))
             
             print()
     else:
@@ -63,47 +74,50 @@ def find_dangerous_calls():
     
     return results
 
-def analyze_taint_flow():
-    """Trace data flow from untrusted sources to sinks"""
+def find_source_sink_candidates():
+    """Report same-function source/sink co-occurrence; no data-flow proof."""
     
     fm = currentProgram.getFunctionManager()
-    taint_flows = []
+    candidates = []
     
-    print("\n=== Analyzing Taint Flow ===\n")
+    print("\n=== Source/sink co-occurrence (not taint analysis) ===\n")
     
     for func in fm.getFunctions(True):
+        monitor.checkCancelled()
         called = get_called_functions(func)
         
-        # Check if function receives tainted input
-        has_source = any(source in called for source in TAINTED_SOURCES)
+        # Check for source and sink names in the same function
+        has_source = any(source in called for source in INPUT_SOURCES)
         has_sink = any(sink in called for sink in DANGEROUS_FUNCTIONS.keys())
         
         if has_source and has_sink:
-            taint_flows.append({
+            candidates.append({
                 'function': func,
-                'sources': [s for s in called if s in TAINTED_SOURCES],
+                'sources': [s for s in called if s in INPUT_SOURCES],
                 'sinks': [s for s in called if s in DANGEROUS_FUNCTIONS.keys()]
             })
     
-    if taint_flows:
-        print("Found {} potential taint flows:\n".format(len(taint_flows)))
+    if candidates:
+        print("Found {} source/sink candidates:\n".format(len(candidates)))
         
-        for flow in taint_flows:
+        for flow in candidates:
             print("Function: {}".format(flow['function'].getName()))
             print("  Sources: {}".format(", ".join(flow['sources'])))
             print("  Sinks: {}".format(", ".join(flow['sinks'])))
-            print("  RISK: Untrusted data may reach dangerous function")
+            print("  REVIEW: Verify data flow, bounds, and attacker control before reporting")
             
             # Add function comment
             func = flow['function']
-            func.setComment("SECURITY: Taint flow from {} to {}".format(
-                flow['sources'][0], flow['sinks'][0]
-            ))
+            note = "REVIEW: source/sink co-occurrence: {} / {}; data flow unverified".format(
+                ", ".join(flow['sources']), ", ".join(flow['sinks']))
+            previous = func.getComment() or ""
+            if note not in previous.splitlines():
+                func.setComment(previous + ("\n" if previous else "") + note)
             
             print()
 
 def find_stack_buffers():
-    """Identify local stack buffers that could overflow"""
+    """Identify large recovered stack objects near risky API calls"""
     
     fm = currentProgram.getFunctionManager()
     buffer_risks = []
@@ -111,6 +125,7 @@ def find_stack_buffers():
     print("\n=== Analyzing Stack Buffer Usage ===\n")
     
     for func in fm.getFunctions(True):
+        monitor.checkCancelled()
         # Get stack frame
         stack_frame = func.getStackFrame()
         if not stack_frame:
@@ -134,52 +149,50 @@ def find_stack_buffers():
                     })
     
     if buffer_risks:
-        print("Found {} functions with stack buffers and dangerous calls:\n".format(
+        print("Found {} large stack objects in functions with risky API calls:\n".format(
             len(buffer_risks)))
         
         for risk in buffer_risks[:20]:  # Top 20
             print("Function: {} at {}".format(
                 risk['function'].getName(),
                 risk['function'].getEntryPoint()))
-            print("  Buffer: {} ({} bytes)".format(
+            print("  Stack object (type/bounds unverified): {} ({} bytes)".format(
                 risk['buffer'].getName(),
                 risk['size']))
             print()
 
-def get_called_functions(func):
-    """Get list of called function names"""
-    called = set()
-    instr_iter = listing.getInstructions(func.getBody(), True)
-    
-    for instr in instr_iter:
-        if instr.getFlowType().isCall():
-            for ref in instr.getReferencesFrom():
-                if ref.getReferenceType().isCall():
-                    target = listing.getFunctionAt(ref.getToAddress())
-                    if target:
-                        called.add(target.getName())
-    
-    return list(called)
+def get_call_sites(func):
+    """Enumerate resolved direct calls, including repeated calls to the same API."""
+    for instr in listing.getInstructions(func.getBody(), True):
+        monitor.checkCancelled()
+        seen = set()
+        for ref in instr.getReferencesFrom():
+            if ref.getReferenceType().isCall():
+                target = getFunctionAt(ref.getToAddress())
+                if target:
+                    if target.isThunk():
+                        target = target.getThunkedFunction(True) or target
+                    name = target.getName()
+                    if name not in seen:
+                        seen.add(name)
+                        yield instr.getAddress(), name
 
-def find_call_site(caller, callee_name):
-    """Find address where function calls another function"""
-    instr_iter = listing.getInstructions(caller.getBody(), True)
-    
-    for instr in instr_iter:
-        if instr.getFlowType().isCall():
-            for ref in instr.getReferencesFrom():
-                if ref.getReferenceType().isCall():
-                    target = listing.getFunctionAt(ref.getToAddress())
-                    if target and target.getName() == callee_name:
-                        return instr.getAddress()
-    
-    return None
+
+def get_called_functions(func):
+    return sorted(set(name for _, name in get_call_sites(func)))
+
+
+def append_eol_comment(addr, note):
+    previous = listing.getComment(CodeUnit.EOL_COMMENT, addr) or ""
+    if note not in previous.splitlines():
+        setEOLComment(addr, previous + ("\n" if previous else "") + note)
 
 # Run all analyses
 dangerous = find_dangerous_calls()
-analyze_taint_flow()
+find_source_sink_candidates()
 find_stack_buffers()
 
 print("\n=== Summary ===")
 print("Review all findings above for potential vulnerabilities.")
-print("Manually verify each case - static analysis can have false positives.")
+print("Candidates only: unresolved indirect calls and inlined operations may be missed.")
+print("Verify attacker control, destination size, lengths and reachability manually.")

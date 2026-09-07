@@ -8,7 +8,7 @@
 | Codex | `.agents/plugins` catalog and `.codex-plugin` manifest | Select in `/skills` or mention `$firmware-reverse-engineering:<skill-name>`. |
 | Other Agent Skills hosts | Complete skill directories, including their resources | Depends on the host. |
 
-All routes use the same five skills. Plugin skills have the `firmware-reverse-engineering:` prefix in both hosts. Standalone skill copies use their original names. The original frontmatter mentions Claude, but it contains the standard `name` and `description` fields and no host-specific tool restrictions. The wording has been preserved.
+All routes use the same five skills. Plugin skills have the `firmware-reverse-engineering:` prefix in both hosts. Standalone skill copies use their original names. Frontmatter uses standard `name` and `description` fields, host-neutral wording and no host-specific tool restrictions.
 
 If you prefer manual installation, copy the desired complete skill directories from `plugins/firmware-reverse-engineering/skills/` into one of these locations:
 
@@ -25,11 +25,11 @@ The plugin contains instructions and analysis resources. It does not install ext
 
 | Workflow | External environment needed |
 | --- | --- |
-| Extraction | Binwalk and the filesystem utilities used by the selected recipe. Binwalk version differences are an open release issue. |
+| Extraction | Binwalk 3.1.0 plus selected external extractors. Development-branch and 2.x flags differ. |
 | Static analysis | `file`, `strings`, `readelf`, `objdump`, `xxd`, and relevant architecture toolchains. |
-| Ghidra | Ghidra with its scripting runtime. The bundled scripts are Ghidra scripts, not ordinary standalone Python programs. Known script issues remain open. |
+| Ghidra | Ghidra 12.1.3, JDK 21 and the bundled Jython extension. Scripts explicitly select Jython, not the default PyGhidra runtime. |
 | Emulation | Linux with the relevant QEMU targets, GDB, and networking tools. Firmadyne/FirmAE are separate installations. |
-| Reports | Markdown output works with the supplied templates. PDF conversion needs an external PDF skill or the Pandoc/LaTeX route already described by the reporting skill. |
+| Reports | Markdown output works with the supplied templates. PDF conversion needs Pandoc/XeLaTeX or a separately installed PDF skill. |
 
 Most recipes assume Linux and use Debian/Ubuntu package names. Native Windows and macOS firmware execution have not been validated; use a suitable Linux environment for those recipes. Agent installation compatibility does not establish compatibility of every firmware target or tool version.
 
@@ -69,7 +69,28 @@ Test standalone discovery without installing anything:
 npx skills add . --list
 ```
 
-Then perform a real static-analysis task against a small binary you own and check the output against `file` and `readelf`. Ghidra and emulation require their own runtime tests after the technical issues are resolved. Do not infer their correctness from manifest validation.
+Then perform a real static-analysis task against a small binary you own and check the output against `file` and `readelf`. Run the separate runtime checks below. Do not infer firmware behavior from manifest validation.
+
+## Runtime checks
+
+Install `requirements-dev.txt` before the unit tests. The Ghidra test needs GCC,
+Ghidra 12.1.3 and JDK 21. Install its bundled Jython extension through File →
+Install Extensions, or unpack the release's `Extensions/Ghidra/*_Jython.zip`
+into `Ghidra/Extensions/` in an isolated test installation.
+
+```sh
+python3 tools/validate_repo.py --release
+python3 -m unittest discover -s tests -v
+python3 tools/check_ghidra_runtime.py --ghidra-home /absolute/path/to/ghidra_12.1.3_PUBLIC
+python3 tools/check_binwalk_runtime.py --binwalk /absolute/path/to/binwalk
+```
+
+The Ghidra test compiles a benign x86-64 ELF, runs all four scripts twice and
+checks naming, annotations, direct call sites, both table byte orders and
+bounded scanning across sparse memory. It requires an explicit success marker
+because headless Ghidra can exit zero after a script exception. The Binwalk test
+checks extraction against exact gzip plaintext, CLI filters, JSON and entropy
+output. Neither test boots vendor firmware or demonstrates exploitability.
 
 ## Updates and removal
 

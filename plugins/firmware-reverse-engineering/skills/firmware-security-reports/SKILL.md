@@ -1,11 +1,15 @@
 ---
 name: firmware-security-reports
-description: "Professional security report generation for firmware assessments following American security firm standards (Trail of Bits, Bishop Fox, NCC Group). Use when Claude needs to create technical security reports from firmware analysis. Covers: (1) Full penetration test reports with executive summaries and technical details, (2) Individual vulnerability findings with CVSS 3.1 scoring, (3) Working notes for documentation during assessment, (4) Integration with firmware analysis skills (extraction, static analysis, Ghidra RE, emulation). Outputs to markdown and PDF formats. Technical audience only. Includes templates for findings, PoC code, remediation guidance, and evidence documentation."
+description: "Evidence-based security report generation for firmware assessments. Use when the agent needs to create technical security reports from firmware analysis. Covers: (1) Full penetration test reports with executive summaries and technical details, (2) Individual vulnerability findings with CVSS 3.1 scoring, (3) Working notes for documentation during assessment, (4) Integration with firmware analysis skills (extraction, static analysis, Ghidra RE, emulation). Outputs to markdown and PDF formats. Technical audience only. Includes templates for findings, PoC code, remediation guidance, and evidence documentation."
 ---
 
 # Firmware Security Report Generation
 
 Professional technical security reports for firmware assessments, following industry standards from elite American security firms.
+
+All example findings, products, versions, addresses and scores in this skill
+and its templates are illustrative. Replace them with verified assessment
+evidence; do not carry example results into a deliverable.
 
 ## Skill Scope
 
@@ -17,7 +21,7 @@ Professional technical security reports for firmware assessments, following indu
 
 **Output Formats:**
 - Markdown (version-controllable, easy to edit)
-- PDF (client deliverable via pdf skill)
+- PDF (via Pandoc, or a separately installed PDF skill if available)
 
 **Integration:**
 - Consumes outputs from: firmware-extraction, firmware-static-analysis, ghidra-re, firmware-emulation
@@ -109,13 +113,13 @@ binwalk -e firmware.bin
 readelf -h binary
 strings binary | grep password
 
-# 3. Ghidra RE
-analyzeHeadless /proj Firmware -import binary \
+# 3. Ghidra RE (set GHIDRA_INSTALL_DIR/GHIDRA_SCRIPT_DIR as in ghidra-re)
+"$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /proj Firmware -scriptPath "$GHIDRA_SCRIPT_DIR" -import binary \
   -postScript find_auth_functions.py \
   -postScript find_buffer_overflows.py
 
 # 4. Emulation & testing
-qemu-arm -L ./rootfs/ binary
+qemu-arm -L ./rootfs/ ./binary
 curl -X POST http://192.168.1.1/vuln.cgi -d "param=;id"
 
 # 5. Document in working notes
@@ -231,9 +235,10 @@ From your assessment notes:
 ### Security Mitigations
 | Mitigation | Status | Notes |
 |------------|--------|-------|
-| ASLR/PIE | ❌ Disabled | Compiled as ET_EXEC |
-| Stack Canaries | ✅ Enabled | Present in httpd |
-| NX Stack | ✅ Enabled | Non-executable stack |
+| PIE | No | Example ET_EXEC executable |
+| ASLR | Not tested | Verify runtime policy and mappings |
+| Stack Canaries | Enabled | Present in httpd |
+| NX Stack | Enabled | Non-executable stack |
 
 ### Network Services
 - Port 23/tcp: Telnet (CRITICAL - enabled by default)
@@ -252,7 +257,7 @@ From your assessment notes:
 ### Phase 2: High Severity (30-60 days)
 1. Replace hardcoded keys
 2. Implement input validation framework
-3. Enable ASLR for all binaries
+3. Build supported executables as PIE and verify runtime ASLR
 ```
 
 **Step 7: Review and polish**
@@ -263,15 +268,19 @@ From your assessment notes:
 
 ### Phase 4: PDF Generation
 
-**Option 1: Use PDF skill**
+**Option 1: Use a separately installed PDF skill, if available**
 ```bash
 # Read pdf skill for conversion
 # Convert markdown to professional PDF
 ```
 
-**Option 2: Use pandoc**
+**Option 2: Use Pandoc with XeLaTeX installed**
+
+Choose fonts that cover the report characters, replace unsupported symbols and
+review the rendered pages for clipping and missing glyphs before delivery.
 ```bash
 pandoc final_report.md -o final_report.pdf \
+  --pdf-engine=xelatex \
   --toc \
   --number-sections \
   -V geometry:margin=1in \
@@ -314,15 +323,14 @@ pandoc final_report.md -o final_report.pdf \
 
 ### From ghidra-re
 
-```markdown
+````markdown
 ## Reverse Engineering Findings
 
 **Authentication Function Analysis:**
 
 Function: `check_password` at 0x00401234
-- Uses strcmp() for comparison (timing attack vulnerable)
-- No rate limiting
-- Accepts empty passwords
+- Uses strcmp(); assess whether a remotely measurable secret-dependent timing difference exists
+- Rate limiting and empty-password acceptance require separate verification; the snippet alone does not establish them
 
 Decompiled code:
 ```c
@@ -341,11 +349,11 @@ int check_password(char *username, char *password) {
 - AES S-box found at 0x0040A000
 - MD5 constants in auth_daemon
 - Hardcoded key: `0x0123456789ABCDEF0123456789ABCDEF`
-```
+````
 
 ### From firmware-emulation
 
-```markdown
+````markdown
 ## Dynamic Analysis Results
 
 **Emulation Environment:**
@@ -375,27 +383,27 @@ $ curl -X POST http://192.168.100.2/cgi-bin/admin.cgi \
 
 Response: uid=0(root) gid=0(root)
 ```
-```
+````
 
 ## Best Practices
 
 ### Writing Technical Findings
 
 **DO:**
-✅ Use precise technical language
-✅ Include addresses, file paths, line numbers
-✅ Provide working proof-of-concept code
-✅ Show before/after code for remediation
-✅ Calculate accurate CVSS scores
-✅ Include evidence (screenshots, PCAPs)
-✅ Explain impact clearly
+Use precise technical language
+Include addresses, file paths, line numbers
+Provide working proof-of-concept code
+Show before/after code for remediation
+Calculate accurate CVSS scores
+Include evidence (screenshots, PCAPs)
+Explain impact clearly
 
 **DON'T:**
-❌ Use vague descriptions ("security issue found")
-❌ Over-hype severity without justification
-❌ Provide theoretical exploits without validation
-❌ Skip remediation guidance
-❌ Forget to include CWE/OWASP references
+Use vague descriptions ("security issue found")
+Over-hype severity without justification
+Provide theoretical exploits without validation
+Skip remediation guidance
+Forget to include CWE/OWASP references
 
 ### CVSS Scoring
 
@@ -548,7 +556,7 @@ cp assets/pentest_report_template.md final_report.md
 # Import findings, add analysis, create roadmap
 
 # 4. Generate PDF (use pdf skill or pandoc)
-# pandoc final_report.md -o final_report.pdf
+# pandoc final_report.md -o final_report.pdf --pdf-engine=xelatex
 ```
 
 ## Integration Example
@@ -559,8 +567,8 @@ Complete workflow from analysis to report:
 # Day 1-3: Analysis
 binwalk -e firmware.bin
 readelf -h binary
-analyzeHeadless /proj Firmware -import binary -postScript find_crypto.py
-qemu-arm -g 1234 -L ./rootfs/ binary
+"$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /proj Firmware -scriptPath "$GHIDRA_SCRIPT_DIR" -import binary -postScript find_crypto.py
+qemu-arm -g 1234 -L ./rootfs/ ./binary
 
 # Day 3-5: Documentation
 cp assets/finding_template.md findings/FW-001-cmdinj.md
@@ -571,24 +579,22 @@ cp assets/pentest_report_template.md acme_iot_gateway_report.md
 # Compile all findings into main report
 
 # Day 7: Delivery
-pandoc acme_iot_gateway_report.md -o acme_iot_gateway_report.pdf
+pandoc acme_iot_gateway_report.md -o acme_iot_gateway_report.pdf --pdf-engine=xelatex
 # Send to client
 ```
 
 ## Professional Standards
 
-This skill follows industry standards from:
-- Trail of Bits (methodology, technical depth)
-- Bishop Fox (finding documentation, PoC quality)
-- NCC Group (report structure, remediation guidance)
-- PTES (Penetration Testing Execution Standard)
-- OWASP (vulnerability categorization)
+Reports should distinguish verified findings, unverified candidates, test
+limitations and informational observations. This repository does not claim
+endorsement or certification by a security consultancy. Use the agreed
+assessment methodology and the applicable FIRST CVSS specification.
 
 **Key principles:**
-1. **Accuracy** - All claims verified with PoC
+1. **Accuracy** - Support claims with reproducible evidence; state what a PoC actually demonstrates
 2. **Reproducibility** - Clear exploitation steps
 3. **Actionability** - Specific remediation guidance
 4. **Evidence** - Screenshots, PCAPs, code samples
 5. **Professionalism** - Technical depth without fluff
 
-This skill produces client-ready deliverables suitable for Fortune 500 companies, government agencies, and high-security environments.
+Review all generated reports against the engagement scope and evidence before delivery.

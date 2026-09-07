@@ -1,6 +1,6 @@
 ---
 name: firmware-static-analysis
-description: "Systematic static analysis of ELF firmware binaries using command-line tools (file, strings, readelf, objdump, xxd). Use when Claude needs to perform initial reconnaissance on firmware/embedded binaries before reverse engineering, specifically for (1) Identifying architecture and binary characteristics, (2) Extracting metadata, strings, and imports, (3) Analyzing symbols, sections, and entry points, (4) Understanding binary structure and dependencies, (5) Generating structured analysis reports. Covers ARM, MIPS, x86, RISC-V, PowerPC architectures. Does NOT handle firmware extraction/unpacking (use separate skill for that)."
+description: "Systematic static analysis of ELF firmware binaries using command-line tools (file, strings, readelf, objdump, xxd). Use when the agent needs to perform initial reconnaissance on firmware/embedded binaries before reverse engineering, specifically for (1) Identifying architecture and binary characteristics, (2) Extracting metadata, strings, and imports, (3) Analyzing symbols, sections, and entry points, (4) Understanding binary structure and dependencies, (5) Generating structured analysis reports. Covers ARM, MIPS, x86, RISC-V, PowerPC architectures. Does NOT handle firmware extraction/unpacking (use separate skill for that)."
 ---
 
 # Firmware Static Analysis
@@ -65,9 +65,9 @@ strings -a <binary> | grep -E '^/|^\.'  # File paths
 
 Examine what functions the binary imports and exports.
 
-### Dynamic Symbols (works on stripped binaries)
+### Dynamic Symbols (when .dynsym is present, including many stripped binaries)
 ```bash
-readelf -Ws <binary>
+readelf --dyn-syms --wide <binary>
 ```
 
 **Look for:**
@@ -107,7 +107,7 @@ readelf -h <binary>
 
 ### Program Headers (Segments)
 ```bash
-readelf -l <binary>
+readelf -lW <binary>
 ```
 
 **Check for:**
@@ -150,27 +150,37 @@ readelf -d <binary>
 
 ## Step 5: Security Analysis
 
-Assess security features and mitigations.
+Assess available evidence, retaining an **unknown/not observed** result where needed.
+`PT_GNU_RELRO` is a program header. For conventional dynamically linked ELF,
+that segment plus immediate binding (`BIND_NOW` or `FLAGS/FLAGS_1` containing
+`NOW`) indicates full RELRO; the segment alone indicates partial RELRO.
+Absent dynamic tags in a static binary require a different assessment.
+
+`GNU_STACK` without `E` requests a non-executable stack. A missing header is
+unknown and depends on the ABI/kernel. Canary or `_chk` symbols show some
+instrumentation, not complete coverage; absence does not prove absence in
+stripped, static or inlined code. Inspect relevant functions when reporting.
 
 ### PIE/ASLR Check
 ```bash
 readelf -h <binary> | grep Type
 ```
 - `Type: EXEC (Executable file)` = Non-PIE (fixed addresses)
-- `Type: DYN (Shared object file)` = PIE-enabled OR shared library
+- `Type: DYN (Shared object file)` = PIE candidate OR shared library. Check `FLAGS_1: PIE`, loader metadata and intended use.
+- ASLR is runtime policy, not established by ELF type. Verify on the target kernel and compare mappings across runs.
 
 ### Security Features Check
 ```bash
-readelf -d <binary> | grep -E 'BIND_NOW|RELRO'
-readelf -l <binary> | grep -E 'GNU_RELRO|GNU_STACK'
-readelf -Ws <binary> | grep -E '__stack_chk|__fortify'
+readelf -dW <binary> | grep -E 'BIND_NOW|FLAGS.*NOW'
+readelf -lW <binary> | grep -E 'GNU_RELRO|GNU_STACK'
+readelf -Ws <binary> | grep -E '__stack_chk_fail|__(memcpy|memmove|strcpy|strncpy|sprintf|snprintf|printf)_chk'
 ```
 
 **Look for:**
 - **RELRO** (RELocation Read-Only) - GOT protections
 - **Stack canaries** (`__stack_chk_fail`)
 - **NX stack** (non-executable stack via GNU_STACK)
-- **Fortify** source (`__fortify_function`)
+- **Fortify evidence**: checked wrappers such as `__memcpy_chk` or `__snprintf_chk`
 
 ## Step 6: Metadata Extraction
 
@@ -264,7 +274,8 @@ Create a structured markdown report with all findings. Use this template:
 - **Architecture:** [CPU architecture, bitness, endianness]
 - **Entry Point:** [address]
 - **Link Type:** [static/dynamic]
-- **PIE/ASLR:** [Enabled/Disabled]
+- **PIE:** [Yes/No/Unknown; evidence]
+- **ASLR:** [Runtime tested / Not tested; evidence]
 - **Stripped:** [Yes/No]
 
 ## Architecture Details
@@ -330,11 +341,12 @@ Create a structured markdown report with all findings. Use this template:
 ## Security Analysis
 
 ### Mitigations Detected
-- ✓ PIE/ASLR: [Enabled/Disabled]
-- ✓ RELRO: [Full/Partial/None]
-- ✓ Stack Canaries: [Present/Absent]
-- ✓ NX Stack: [Enabled/Disabled]
-- ✓ Fortify Source: [Present/Absent]
+- PIE: [Yes/No/Unknown; evidence]
+- ASLR: [Runtime result/Not tested]
+- RELRO: [Full/Partial/None/Unknown; evidence]
+- Stack canary evidence: [Observed/Not observed/Unknown; coverage unverified]
+- Stack execute request: [Non-executable/Executable/Missing; runtime unverified]
+- Fortify evidence: [Observed/Not observed/Unknown]
 
 ### Security Concerns
 [List any security issues found]
@@ -386,10 +398,10 @@ Create a structured markdown report with all findings. Use this template:
 
 - **Always work on a copy** - Never modify the original firmware binary
 - **Save intermediate outputs** - Redirect command outputs to files for reference (e.g., `strings -a binary > strings.txt`)
-- **Cross-reference findings** - Correlate string analysis with symbol analysis
+- **Cross-reference findings** - Strings/imports are candidates; verify authentication use, attacker control and reachability before reporting a vulnerability
 - **Architecture matters** - Load the architecture reference early if unfamiliar with the target
 - **Document as you go** - Build the report incrementally during analysis
 - **Look for the unusual** - Hardcoded credentials, unusual network addresses, and debug paths are common in firmware
-- **Check toolchain** - Compiler versions can reveal vulnerabilities or capabilities
+- **Check toolchain** - Version strings are clues; verify component identity, backports and vulnerable code before assigning a CVE
 - **PIE vs non-PIE** - ET_EXEC binaries have fixed addresses, making analysis easier
 - **Stripped binaries** - Don't despair, entry point and PLT calls still provide context

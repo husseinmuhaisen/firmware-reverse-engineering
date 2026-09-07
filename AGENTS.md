@@ -18,6 +18,6 @@ Keep packaging work in separate changes from technical revisions. Record discove
 
 ## Validation
 
-Run `python3 tools/validate_repo.py` and `python3 -m unittest discover -s tests -v`. These check packaging and unchanged skill content. `python3 tools/validate_repo.py --release` also treats known missing resources and a missing license as release blockers.
+Run `python3 tools/validate_repo.py` and `python3 -m unittest discover -s tests -v`. These check packaging, the approved content baseline, and selected executable examples. `python3 tools/validate_repo.py --release` also treats missing resources and license files as release blockers. Run the Ghidra and Binwalk runtime checks in docs/compatibility.md when changing their scripts or recipes.
 
 The content baseline records approved bytes. Update it only with explicit approval for the corresponding technical changes; do not regenerate it just to make checks pass.

@@ -1,6 +1,13 @@
 # CVSS 3.1 Scoring Reference
 
-Quick reference for calculating Common Vulnerability Scoring System scores.
+Quick reference for **CVSS 3.1**, retained for assessments using that version.
+CVSS 4.0 is also available; agree the reporting version and do not mix metric
+sets. These examples are illustrative assumptions, not automatic scores for
+vulnerability classes. Justify every metric using observed capabilities and
+prerequisites; CVSS measures severity, not business risk.
+
+Use the [FIRST specification](https://www.first.org/cvss/v3.1/specification-document)
+and [user guide](https://www.first.org/cvss/v3.1/user-guide) for edge cases.
 
 ## CVSS Calculator
 
@@ -14,13 +21,13 @@ Quick reference for calculating Common Vulnerability Scoring System scores.
 - Examples: Remote command injection, unauthenticated API exploitation
 - "An attacker can exploit from any network"
 
-**A - Adjacent (0.62):** Requires local network access
-- Examples: ARP spoofing, DHCP attacks, same subnet exploitation
-- "An attacker must be on the same physical or logical network"
+**A - Adjacent (0.62):** Exploitation is constrained to a shared physical/logical network
+- Examples: link-local protocol attacks such as ARP spoofing
+- A TCP service restricted by deployment to a LAN is not automatically AV:A; assess the protocol and exploitation path.
 
 **L - Local (0.55):** Requires local system access
-- Examples: Privilege escalation, local file inclusion
-- "An attacker must have local access or local account"
+- Examples: local privilege escalation, malicious local file processing
+- Local file inclusion through HTTP can be AV:N; the word "local" in its name does not determine AV.
 
 **P - Physical (0.20):** Requires physical access to device
 - Examples: UART/JTAG exploitation, physical reset button attacks
@@ -36,12 +43,13 @@ Quick reference for calculating Common Vulnerability Scoring System scores.
 **H - High (0.44):** Requires special conditions
 - Timing-dependent, race conditions
 - Requires specific configuration
-- Examples: TOCTOU bugs, complex multi-step exploits
+- Examples: a required race or on-path position outside attacker control
+- Number of exploit steps or research effort alone does not determine AC:H.
 
 ### Privileges Required (PR)
 
 **N - None (0.85):** No authentication needed
-- Examples: Unauthenticated endpoints, default credentials
+- Examples: unauthenticated endpoints; assess shared hardcoded credentials in the specific vulnerability context
 
 **L - Low (0.62 / 0.68):** Basic user privileges
 - Examples: Authenticated user exploitation, requires user account
@@ -54,19 +62,18 @@ Quick reference for calculating Common Vulnerability Scoring System scores.
 ### User Interaction (UI)
 
 **N - None (0.85):** No user action required
-- Examples: Automatic exploitation, drive-by attacks
+- Examples: exploitation of a reachable service without another user acting
 
 **R - Required (0.62):** User must take action
 - Examples: Click malicious link, open malicious file, social engineering
 
 ### Scope (S)
 
-**U - Unchanged (Impact * Base):** Vulnerability limited to vulnerable component
-- Impact stays within original security scope
+**U - Unchanged:** Impact remains under the same security authority as the vulnerable component.
 
-**C - Changed (Impact * 7.52 - 8):** Vulnerability affects resources beyond vulnerable component
-- Can impact other components/systems
-- Examples: VM escape, container breakout, privilege escalation
+**C - Changed:** Exploitation crosses a security-authority boundary, such as a
+VM escape affecting the host. Reaching another process or escalating privileges
+within one authority does not by itself establish S:C.
 
 ### Impact Metrics (C/I/A)
 
@@ -121,7 +128,7 @@ Rationale:
 - Low complexity (AC:L)
 - No auth required (PR:N)
 - Bypasses authentication (C:H/I:H)
-- Doesn't crash device (A:N)
+- Assumes the bypass cannot impair availability (A:N); absence of a crash is insufficient
 ```
 
 ### Hardcoded Credentials
@@ -144,7 +151,7 @@ Base Score: 7.8 (High)
 CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H
 Base Score: 9.8 (Critical)
 
-If ASLR present (more complex):
+If exploitation requires a demonstrated condition outside attacker control (ASLR alone is insufficient):
 CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H
 Base Score: 8.1 (High)
 ```
@@ -224,7 +231,7 @@ Base Score: 6.5 (Medium)
 
 2. How hard to exploit?
    Reliable/straightforward → AC:L
-   Timing/race/complex → AC:H
+   Required condition outside attacker control → AC:H
 
 3. Authentication needed?
    No auth → PR:N
@@ -236,8 +243,8 @@ Base Score: 6.5 (Medium)
    Requires click/action → UI:R
 
 5. Escapes original scope?
-   Stays in component → S:U
-   Breaks out (container/VM/privilege) → S:C
+   Same security authority → S:U
+   Crosses security authority (for example VM to host) → S:C
 
 6. What can attacker do?
    Read all data → C:H
@@ -257,10 +264,10 @@ Base Score: 6.5 (Medium)
 
 ### Exploit Code Maturity (E)
 - **X - Not Defined:** Default
-- **H - High:** Public exploit available
-- **F - Functional:** PoC exists
-- **P - Proof-of-Concept:** Theoretical exploit
-- **U - Unproven:** No known exploit
+- **H - High:** Reliable autonomous exploitation, or detailed reliable exploitation evidence
+- **F - Functional:** Functional exploit works in most applicable situations
+- **P - Proof-of-Concept:** PoC exists but may need substantial modification
+- **U - Unproven:** Theoretical; no exploit code or demonstrated exploitation known
 
 ### Remediation Level (RL)
 - **X - Not Defined:** Default
@@ -289,68 +296,52 @@ Adjust based on specific deployment:
 
 ## Quick Reference Card
 
-**Critical (9.0-10.0):**
-- Remote code execution, no auth required
-- Authentication bypass with full access
-- Remote DoS, no auth required
-
-**High (7.0-8.9):**
-- RCE requiring authentication
-- Privilege escalation to root
-- Sensitive data disclosure
-
-**Medium (4.0-6.9):**
-- XSS, CSRF
-- Limited information disclosure
-- Authenticated DoS
-
-**Low (0.1-3.9):**
-- Low-impact information disclosure
-- Self-DoS only
-- Theoretical attacks
+Use the numeric severity table above after calculating the full vector.
+Vulnerability names do not determine severity: unauthenticated remote DoS with
+only A:H is 7.5 (High), while a demonstrated unauthenticated remote full
+compromise may be 9.8 (Critical). A theoretical concern needs evidence before
+it is treated as a vulnerability.
 
 ## Common Mistakes
 
-❌ **Don't:**
+**Don't:**
 - Give C:H/I:H/A:H to everything
 - Ignore attack prerequisites (set PR:N for admin-only vuln)
 - Confuse complexity with impact
 - Score based on "feels critical"
 
-✅ **Do:**
+**Do:**
 - Consider actual attack vector
 - Account for required privileges
 - Be consistent across findings
 - Justify scores in report
 
-## Examples from Real Firmware
+## Illustrative Firmware Scenarios
 
-### Telnet Enabled by Default
+### Telnet with Shared Hardcoded Root Credentials
 ```
-CVSS:3.1/AV:A/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H
-Score: 8.8 (High)
+CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H
+Score: 9.8 (Critical)
 
-- Adjacent network (local network) (AV:A)
+- TCP service reachable over a routed network (AV:N)
 - No credentials needed if hardcoded (PR:N)
 - Full compromise (C:H/I:H/A:H)
 ```
 
-### Firmware Update Over HTTP
+### Unsigned Firmware Update Over HTTP (On-Path Attacker)
 ```
-CVSS:3.1/AV:A/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:H
-Score: 7.1 (High)
+CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:H
+Score: 7.5 (High)
 
-- Requires MITM position (AV:A, AC:H)
+- Assumes an on-path position on a routed network (AV:N, AC:H)
+- No effective image signature verification; HTTP alone does not prove arbitrary firmware installation
 - User must trigger update (UI:R)
 - Can install malicious firmware (C:H/I:H/A:H)
 ```
 
 ### Debug Symbols in Production
-```
-CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N
-Score: 4.0 (Medium)
 
-- Need local access to binary (AV:L)
-- Makes reverse engineering easier (C:L)
-- Doesn't directly compromise (I:N/A:N)
-```
+Debug symbols alone are not a scored confidentiality vulnerability merely
+because they make reverse engineering easier. Record them as an informational
+observation unless they expose information that a security policy protects.
+If such exposure exists, score the actual access path and impact with evidence.

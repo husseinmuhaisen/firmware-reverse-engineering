@@ -1,52 +1,61 @@
 # Release readiness review
 
-Review date: September 7, 2026. Original repository commit: `e47b88bc96f2e269f71acfc702c0699f6593581b` (January 17, 2026).
+Reviewed September 7, 2026. Original commit: `e47b88bc96f2e269f71acfc702c0699f6593581b`.
 
-## Scope and preservation
+## Authorized scope
 
-This change prepares repository structure, agent packaging, installation documentation, and validation. The five original skills and all 25 files inside them were moved without byte changes. That includes frontmatter, instructions, references, templates, and all three Ghidra scripts.
+The initial packaging commit moved all 25 original skill files without byte
+changes. Hussein subsequently explicitly authorized the technical fixes and
+requested the license used by SpecterOps. This follow-up fixes concrete errors
+while retaining the five skills and their workflows. It adds Apache-2.0 (the
+SpecterOps repository's root license), matching plugin metadata and NOTICE files.
+The content baseline now records the approved revised files and missing script.
+No default-branch merge, visibility change or release publication was performed.
 
-The repository was already public at review time. No visibility change, default-branch merge, release tag, or license selection is part of this packaging change.
+## Technical fixes
 
-## Technical changes awaiting maintainer approval
+| Area | Corrections |
+| --- | --- |
+| Ghidra scripts | Explicit Jython runtime for 12.1.3; initialized state/imports; proper Java byte arrays; bounded initialized-block scans; both crypto-table byte orders; cancellation checks; repeated call sites; preserved analyst names/comments; idempotent annotations. Supplied the documented auto-rename implementation. |
+| Ghidra examples | Correct signature API use, loader entry points, A32 prologue byte order, previous-instruction traversal, analyzer API and headless script paths. Marked incomplete inference sketches and optional export scripts accurately. |
+| Analysis evidence | Source/sink co-occurrence is not taint analysis; crypto prefixes and string/API matches are candidates. PIE is separate from runtime ASLR; RELRO, canary and Fortify conclusions require appropriate evidence. |
+| Extraction | Pinned examples to tagged Binwalk 3.1.0; corrected filters, entropy and output assumptions; removed nonexistent options. Corrected JFFS2/UBI mounting assumptions, RomFS extraction, filesystem tool syntax, byte order, XOR/header checks and AES probe validation. |
+| Emulation/debugging | Corrected FirmAE modes and Firmadyne flags, AFL++ invocation, QEMU paths and machine prerequisites, GDB userspace attach/core/Thumb/format-argument examples, and snapshot limitations. Removed invented performance/success guarantees. |
+| Network examples | Distinguished QEMU user networking from system NAT and GDB traffic; corrected certificate decoding/trust setup, TCP stream assumptions, packet modification, TCP fuzz connections and Lua PDU bounds/reassembly. |
+| Reporting | Corrected CVSS definitions and scenario assumptions, separated examples from evidence, fixed privilege dropping before exec, made PDF dependencies explicit and repaired nested Markdown fences/status glyphs. |
 
-These are findings, not replacement instructions. No proposed fix below has been applied to the skills.
+## Verification and limits
 
-| Finding | Evidence | Proposed work requiring approval |
-| --- | --- | --- |
-| Missing Ghidra script | `ghidra-re/SKILL.md` directs the agent to run `scripts/auto_rename.py`, but that file is absent from the original repository. | Decide whether to supply the intended implementation or remove/correct the reference. |
-| Undefined Ghidra script state | `find_auth_functions.py` and `find_buffer_overflows.py` use `listing` without initialization. Minimal probes of their helper functions reproduce `NameError: name 'listing' is not defined`. Ghidra's documented script state supplies `currentProgram`; it does not supply a `listing` field. | Initialize the listing through the program API and test the scripts on a small fixture in the selected Ghidra runtime. |
-| Missing symbol import | `find_auth_functions.py` and `find_crypto.py` use `SourceType.ANALYSIS` without importing `ghidra.program.model.symbol.SourceType`. The data-package wildcard import in `find_crypto.py` does not import the symbol package. | Add the required import and exercise the rename paths in Ghidra. |
-| Crypto scan termination and runtime assumptions | `find_crypto.py` advances addresses with `addr.add(4)` under `while addr`, catches memory-read errors, and has no explicit end-address bound. Its byte search passes a Python string to a Java byte-array API. These paths were reviewed, not run in Ghidra. | Bound scanning to initialized memory blocks, check cancellation, and verify byte conversion in the intended scripting runtime. |
-| Binwalk CLI drift | Extraction instructions use `-C`, `--dd`, `-J`, and other legacy options. The current upstream Rust CLI parser instead defines options such as `--directory` and `--png`; it does not define those legacy flags. Some recipes also need a correctness review beyond a simple version substitution. | Choose supported Binwalk versions and validate command examples against a known firmware fixture before revising them. |
-| External report capability | The reporting skill refers to a separate `pdf` skill, which this repository does not include. It also describes a Pandoc route. | Decide whether to make the dependency explicit in the skill and document a tested conversion route. |
+| Check | Evidence / boundary |
+| --- | --- |
+| Repository checks | Five skills, matching manifests/catalogs/licenses, complete resources and approved SHA-256 baseline. Mutation tests exercise dropped files, changed content, bad paths and metadata drift. |
+| Claude Code | 2.1.263 strict marketplace/plugin validation. No authenticated model session or complete firmware task is claimed. |
+| Codex | 0.153.4 app-server `plugin/read` discovers all five namespaced skills from the local marketplace, without model calls. |
+| Standalone discovery | `skills` 1.5.24 lists all five skills. This does not prove each supported host's runtime behavior. |
+| Ghidra | 12.1.3 with Jython and JDK 21: compiled x86-64 fixture, four scripts twice, exact call-site and annotation assertions, LE/BE constants and a large uninitialized memory block. Not an ARM/MIPS accuracy benchmark or a PyGhidra support claim. |
+| Binwalk | Tagged 3.1.0: known gzip data recovered byte-for-byte, signature filters/all-offset scanning, JSON output and entropy PNG. Jefferson 0.4.7 and ubi-reader 0.8.16 CLI options checked; not every filesystem variant extracted. |
+| Static skill forward test | An independent agent used the revised skill on the compiled fixture: verified the guarded copies, distinguished literal comparison from an authentication boundary, and left runtime ASLR unclaimed. |
+| Executable examples | Python syntax; documented CVSS vectors recomputed using `cvss` 3.6; AES-ECB/CBC and header-offset regressions using PyCryptodome 3.23.0. |
+| PDF | Supplied report template converted with Pandoc/XeLaTeX. Final client reports still need evidence and page-layout review. |
+| Device-specific workflows | QEMU full-system boot, FirmAE/Firmadyne installation, live network interception, arbitrary firmware and exploitability were not end-to-end tested. Recipes state their required environment and target assumptions. |
 
-Paths in this table are relative to `plugins/firmware-reverse-engineering/skills/` where appropriate.
+The earlier marketplace-install attempt could not finish in this environment
+because execution reported cancelled network approval. Loader/manifest tests
+are reported separately from installed agent sessions. Nothing here guarantees
+that every vendor kernel, filesystem variant or analyzer hypothesis will work.
 
-The helper probes establish a missing-name problem only. They are not Ghidra integration tests. QEMU, Firmadyne, FirmAE, extraction tools, and PDF rendering have not been exercised against firmware in this packaging review. Do not claim all technical recipes are current or fully working until their runtime checks are complete.
+## Reproduction and upstream evidence
 
-## License decision
+See [compatibility.md](compatibility.md#runtime-checks) for commands. CI runs the
+lightweight regressions and a checksum-pinned Ghidra integration test. Binwalk's
+runtime test is separately runnable with 3.1.0 installed.
 
-The original repository contains no license file. No license was added or inferred. The maintainer must select a license and confirm any needed attribution before an open-source release. Plugin manifests intentionally omit the license field until then.
-
-## Verification
-
-- SHA-256 baseline covers all 25 original skill files, including all three scripts.
-- Plugin and marketplace metadata are validated separately from technical behavior.
-- Repository checks surface the missing `auto_rename.py` and license as release blockers.
-- Regression tests deliberately change a skill, delete a reference, add an unapproved script, break a catalog path, and drift a plugin version to ensure those failures are detected.
-- Claude Code `2.1.263` strict manifest validation and the Codex plugin schema validator accept the package.
-- Codex CLI `0.153.4` app-server `plugin/read` loaded the local marketplace and discovered all five namespaced skills. This was a read-only discovery check, not an installed model session.
-- The `skills` CLI `1.5.24` found all five skills with `skills add . --list`; it did not install them.
-- Claude Code marketplace installation and broader skill validation could not complete in the review environment: execution reported that network approval was cancelled. No Claude model session or firmware analysis run is claimed.
-
-`python3 tools/validate_repo.py` checks packaging and prints detected release blockers. `python3 tools/validate_repo.py --release` exits unsuccessfully while a required local resource or license is missing. Neither command substitutes for the runtime work in the table above.
-
-## Upstream evidence
-
-- [Binwalk CLI parser](https://github.com/ReFirmLabs/binwalk/blob/master/src/cliparser.rs), reviewed September 7, 2026.
-- [GhidraScript API source](https://github.com/NationalSecurityAgency/ghidra/blob/master/Ghidra/Features/Base/src/main/java/ghidra/app/script/GhidraScript.java).
-- [Ghidra FlatProgramAPI source](https://github.com/NationalSecurityAgency/ghidra/blob/master/Ghidra/Features/Base/src/main/java/ghidra/program/flatapi/FlatProgramAPI.java).
-- [Ghidra SourceType API](https://ghidra.re/ghidra_docs/api/ghidra/program/model/symbol/SourceType.html).
-
-See [compatibility.md](compatibility.md) for agent documentation and reproducible host checks.
+- [SpecterOps root license](https://github.com/SpecterOps/skills/blob/main/LICENSE)
+- [Binwalk 3.1.0 CLI](https://github.com/ReFirmLabs/binwalk/blob/v3.1.0/src/cliparser.rs) and [entropy implementation](https://github.com/ReFirmLabs/binwalk/blob/v3.1.0/src/entropy.rs). The development branch has different flags; `-C` is valid in 3.1.0.
+- [Ghidra 12.1.3 release](https://github.com/NationalSecurityAgency/ghidra/releases/tag/Ghidra_12.1.3_build); bundled API documentation and Jython extension examples were used for runtime corrections.
+- [FirmAE mode parser](https://github.com/pr0v3rbs/FirmAE/blob/master/run.sh) and [Firmadyne workflow](https://github.com/firmadyne/firmadyne#usage)
+- [AFL++ QEMU mode](https://github.com/AFLplusplus/AFLplusplus/blob/stable/qemu_mode/README.md)
+- [QEMU ARM board requirements](https://www.qemu.org/docs/master/system/target-arm.html) and [GDB support](https://www.qemu.org/docs/master/system/gdb.html)
+- [GDB breakpoint command lists](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Break-Commands.html)
+- [Wireshark TLS guidance](https://wiki.wireshark.org/TLS)
+- [FIRST CVSS 3.1 specification](https://www.first.org/cvss/v3.1/specification-document) and [user guide](https://www.first.org/cvss/v3.1/user-guide)

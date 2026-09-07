@@ -1,6 +1,9 @@
 # Firmware Architecture Reference
 
 Quick reference for common firmware architectures and their characteristics.
+Register lists below describe common integer/pointer argument conventions.
+Confirm the ELF ABI, compiler convention, floating-point ABI and ARM/Thumb mode;
+aggregate and floating-point arguments/returns may use other registers or memory.
 
 ## ARM Architectures
 
@@ -8,14 +11,14 @@ Quick reference for common firmware architectures and their characteristics.
 - **File output**: `ELF 32-bit LSB executable, ARM`
 - **Common in**: IoT devices, routers, older embedded systems
 - **Endianness**: Usually little-endian (LE)
-- **Calling convention**: Arguments in r0-r3, return in r0
+- **Calling convention**: AAPCS32: first integer arguments in r0-r3, integer return in r0
 - **Common toolchains**: arm-linux-gnueabi, arm-none-eabi
 
 ### AArch64 (ARM 64-bit)
 - **File output**: `ELF 64-bit LSB executable, ARM aarch64`
 - **Common in**: Modern routers, smartphones, high-end embedded systems
 - **Endianness**: Usually little-endian (LE)
-- **Calling convention**: Arguments in x0-x7, return in x0
+- **Calling convention**: AAPCS64: first integer arguments in x0-x7, integer return in x0
 - **Common toolchains**: aarch64-linux-gnu
 
 ## MIPS Architectures
@@ -24,14 +27,14 @@ Quick reference for common firmware architectures and their characteristics.
 - **File output**: `ELF 32-bit MSB executable, MIPS`
 - **Common in**: Routers (especially older TP-Link, D-Link), network equipment
 - **Endianness**: Can be big-endian (MSB) or little-endian (LSB)
-- **Calling convention**: Arguments in $a0-$a3, return in $v0
+- **Calling convention**: o32 ABI: first integer arguments in $a0-$a3, integer return in $v0
 - **Common toolchains**: mips-linux-gnu, mipsel-linux-gnu
 
 ### MIPS64
 - **File output**: `ELF 64-bit MSB executable, MIPS`
 - **Common in**: Enterprise network equipment
 - **Endianness**: Usually big-endian
-- **Calling convention**: Arguments in $a0-$a7, return in $v0
+- **Calling convention**: n64 ABI: first integer arguments in $a0-$a7, integer return in $v0
 
 ## x86 Architectures
 
@@ -46,7 +49,7 @@ Quick reference for common firmware architectures and their characteristics.
 - **File output**: `ELF 64-bit LSB executable, x86-64`
 - **Common in**: Modern routers, NAS devices, industrial PCs
 - **Endianness**: Little-endian (LE)
-- **Calling convention**: Arguments in rdi, rsi, rdx, rcx, r8, r9; return in rax
+- **Calling convention**: System V AMD64 ABI: first integer arguments in rdi, rsi, rdx, rcx, r8, r9; integer return in rax
 - **Common toolchains**: gcc, clang
 
 ## RISC-V Architectures

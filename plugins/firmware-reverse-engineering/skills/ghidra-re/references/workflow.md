@@ -6,15 +6,15 @@ Streamlined workflow for analyzing firmware binaries in Ghidra.
 
 ```bash
 # Headless analysis (automation-friendly)
-analyzeHeadless /projects MyProject -import binary.elf -scriptPath /scripts
+"$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /projects MyProject -scriptPath "$GHIDRA_SCRIPT_DIR" -import binary.elf
 
 # With post-analysis script
-analyzeHeadless /projects MyProject -import binary.elf \
+"$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /projects MyProject -scriptPath "$GHIDRA_SCRIPT_DIR" -import binary.elf \
   -postScript find_crypto.py -postScript find_auth_functions.py
 
 # Batch import
 for bin in extracted/bin/*; do
-    analyzeHeadless /projects FirmwareAnalysis -import "$bin"
+    "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /projects FirmwareAnalysis -scriptPath "$GHIDRA_SCRIPT_DIR" -import "$bin"
 done
 ```
 
@@ -26,12 +26,13 @@ done
 
 2. **Identify Entry Point**
    ```python
+# @runtime Jython
    # If stripped, find _start or main manually
-   entry = currentProgram.getImageBase()
-   createFunction(entry, "entry")
+   for entry in currentProgram.getSymbolTable().getExternalEntryPointIterator():
+       print(entry)  # Loader entry points; raw images need a researched address
    ```
 
-3. **Find Functions** (scripts/find_functions.py)
+3. **Find Functions** (examples in `references/stripped-analysis.md`)
    - Prologue scanning
    - Cross-reference analysis
    - String reference tracing
@@ -73,10 +74,16 @@ Ctrl-Shift-E  Set function signature
 ### Improve Decompilation
 
 ```python
+# @runtime Jython
 # Set function signature manually
 func = getFunctionAt(currentAddress)
 sig = "int auth_check(char *username, char *password)"
-ApplyFunctionSignatureCmd(func.getEntryPoint(), sig, SourceType.USER_DEFINED).applyTo(currentProgram)
+from ghidra.app.cmd.function import ApplyFunctionSignatureCmd
+from ghidra.app.util.parser import FunctionSignatureParser
+from ghidra.program.model.symbol import SourceType
+assert func is not None
+signature = FunctionSignatureParser(currentProgram.getDataTypeManager(), None).parse(func.getSignature(), sig)
+assert ApplyFunctionSignatureCmd(func.getEntryPoint(), signature, SourceType.USER_DEFINED).applyTo(currentProgram)
 
 # Or via GUI: Ctrl-Shift-E
 ```
@@ -88,11 +95,16 @@ ApplyFunctionSignatureCmd(func.getEntryPoint(), sig, SourceType.USER_DEFINED).ap
 - **DAT_XXXXX** → Unnamed data at address XXXXX
 - **(cast)** → Decompiler inserted type cast
 
+The snippets below illustrate individual operations and assume a valid `func`,
+`listing`, `fm`, and task monitor where used. They are not all standalone scripts.
+Use the bundled scripts for executable automation.
+
 ## Scripting Patterns
 
 ### Iterate All Functions
 
 ```python
+# @runtime Jython
 fm = currentProgram.getFunctionManager()
 for func in fm.getFunctions(True):
     # Process each function
@@ -102,17 +114,22 @@ for func in fm.getFunctions(True):
 ### Modify Function Signature
 
 ```python
+# @runtime Jython
 func = getFunctionAt(currentAddress)
+from ghidra.program.model.listing import Function, ParameterImpl
+from ghidra.program.model.data import *
+from ghidra.program.model.symbol import SourceType
 params = [
     ParameterImpl("buffer", PointerDataType(CharDataType()), currentProgram),
     ParameterImpl("size", DWordDataType(), currentProgram)
 ]
-func.replaceParameters(params, Function.FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS, True, SourceType.USER_DEFINED)
+func.replaceParameters(Function.FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS, True, SourceType.USER_DEFINED, *params)
 ```
 
 ### Create Custom Data Type
 
 ```python
+# @runtime Jython
 dtm = currentProgram.getDataTypeManager()
 struct = StructureDataType("request_packet", 0)
 struct.add(DWordDataType(), "magic", None)
@@ -124,11 +141,12 @@ dtm.addDataType(struct, DataTypeConflictHandler.REPLACE_HANDLER)
 ### Batch Rename
 
 ```python
+# @runtime Jython
 # Rename all FUN_* functions with pattern
 fm = currentProgram.getFunctionManager()
 for func in fm.getFunctions(True):
-    if func.getName().startswith("FUN_"):
-        addr_hex = str(func.getEntryPoint())[-4:]
+    if func.getSymbol().getSource() == SourceType.DEFAULT:
+        addr_hex = str(func.getEntryPoint()).replace(":", "_")
         func.setName("sub_" + addr_hex, SourceType.ANALYSIS)
 ```
 
@@ -137,6 +155,7 @@ for func in fm.getFunctions(True):
 ### P-Code Analysis
 
 ```python
+# @runtime Jython
 # Analyze at IL level
 from ghidra.app.decompiler import DecompInterface
 
@@ -144,25 +163,29 @@ decompiler = DecompInterface()
 decompiler.openProgram(currentProgram)
 results = decompiler.decompileFunction(func, 30, monitor)
 
-high_func = results.getHighFunction()
-for op in high_func.getPcodeOps():
-    print("{}: {}".format(op.getOpcode(), op))
+if results.decompileCompleted():
+    high_func = results.getHighFunction()
+    for op in high_func.getPcodeOps():
+        print("{}: {}".format(op.getOpcode(), op))
+decompiler.dispose()
 ```
 
 ### Custom Analysis Pass
 
 ```python
-# Create custom analyzer
+# @runtime Jython
+# API sketch only: defining this Python class does not register an analyzer.
+# Deploy a Java Ghidra extension for automatic analyzer discovery.
 from ghidra.app.services import AbstractAnalyzer, AnalyzerType
 
 class MyAnalyzer(AbstractAnalyzer):
     def __init__(self):
-        super().__init__("Custom Analyzer", "Description", AnalyzerType.FUNCTION_ANALYZER)
+        AbstractAnalyzer.__init__(self, "Custom Analyzer", "Description", AnalyzerType.FUNCTION_ANALYZER)
     
     def canAnalyze(self, program):
         return True
     
-    def analyze(self, program, addrSet, monitor, log):
+    def added(self, program, addrSet, monitor, log):
         # Your analysis logic
         return True
 ```
@@ -170,6 +193,7 @@ class MyAnalyzer(AbstractAnalyzer):
 ### Export Analysis
 
 ```python
+# @runtime Jython
 # Export to JSON for external processing
 import json
 
@@ -193,7 +217,8 @@ with open('/tmp/analysis.json', 'w') as f:
 
 ```
 File → Export Program → Intel Hex
-# Then import in IDA
+# Intel Hex exports bytes/address layout, not Ghidra names/types/comments.
+# Prefer the original ELF when loading the same executable in IDA.
 ```
 
 ### Binary Diff
@@ -206,15 +231,16 @@ Tools → Version Tracking
 ### Collaborate
 
 ```
-File → Add to Version Control (if using Git)
-File → Merge Tool (resolve conflicts)
+Use a shared project on Ghidra Server for program versioning/check-in.
+Use Git for scripts and exported notes, not live project database files.
 ```
 
 ## Performance Optimization
 
 ```bash
 # Increase heap for large binaries
-ghidraRun -Xmx8G
+# Set MAXMEM=8G in the ghidraRun launcher (see its existing MAXMEM setting).
+"$GHIDRA_INSTALL_DIR/ghidraRun"
 
 # Disable auto-analysis for very large files
 # Import, then selectively analyze regions
@@ -223,20 +249,21 @@ ghidraRun -Xmx8G
 ## Debugging Ghidra Scripts
 
 ```python
+# @runtime Jython
 # Print to console
 print("Debug: value={}".format(value))
 
 # Use monitor for progress
 monitor.setMessage("Processing function...")
-monitor.setProgress(i, total)
+monitor.initialize(total)
+monitor.setProgress(i)
 
 # Check for cancellation
-if monitor.isCancelled():
-    return
+monitor.checkCancelled()
 
 # Exception handling
 try:
-    # risky operation
+    pass  # Replace with the operation being investigated
 except Exception as e:
     print("Error: {}".format(e))
     import traceback
@@ -248,6 +275,7 @@ except Exception as e:
 ### Find Format String Bugs
 
 ```python
+# @runtime Jython
 # Find printf-family calls with user-controlled format
 for func in fm.getFunctions(True):
     for call in get_call_sites(func):
@@ -259,19 +287,22 @@ for func in fm.getFunctions(True):
 ### Identify Command Injection
 
 ```python
+# @runtime Jython
 # Find system/exec calls
-dangerous_exec = ['system', 'popen', 'exec', 'execve']
+dangerous_exec = ['system', 'popen', 'execl', 'execve']
+# execve does not invoke a shell; assess executable/argument control separately.
 
 for func in fm.getFunctions(True):
     called = get_called_functions(func)
     if any(d in called for d in dangerous_exec):
         # Analyze arguments for user input
-        print("Potential command injection in {}".format(func.getName()))
+        print("Execution API candidate in {}".format(func.getName()))
 ```
 
 ### Map Memory Regions
 
 ```python
+# @runtime Jython
 mem = currentProgram.getMemory()
 for block in mem.getBlocks():
     print("{}: {} - {} ({} bytes) [{}]".format(
@@ -279,6 +310,8 @@ for block in mem.getBlocks():
         block.getStart(),
         block.getEnd(),
         block.getSize(),
-        "RWX" if block.isExecute() else "R" if block.isRead() else ""
+        ("R" if block.isRead() else "-") +
+        ("W" if block.isWrite() else "-") +
+        ("X" if block.isExecute() else "-")
     ))
 ```

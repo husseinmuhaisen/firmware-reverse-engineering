@@ -1,6 +1,6 @@
 ---
 name: firmware-emulation
-description: "Comprehensive firmware dynamic analysis and emulation using QEMU (user-mode and system-mode), GDB debugging, network traffic analysis, and automated tools (Firmadyne/FirmAE). Use when Claude needs to run extracted firmware for dynamic analysis. Covers: (1) Deciding between automated vs manual emulation approaches, (2) QEMU user-mode emulation for individual binaries, (3) QEMU system-mode emulation for full firmware stack, (4) Advanced GDB debugging with gdb-multiarch, (5) Network traffic capture and protocol analysis, (6) MITM attacks and traffic manipulation, (7) Automated emulation with Firmadyne/FirmAE, (8) Troubleshooting boot failures and network issues. Requires extracted firmware (use firmware-extraction skill first). Complements firmware-static-analysis skill with runtime behavior observation."
+description: "Comprehensive firmware dynamic analysis and emulation using QEMU (user-mode and system-mode), GDB debugging, network traffic analysis, and automated tools (Firmadyne/FirmAE). Use when the agent needs to run extracted firmware for dynamic analysis. Covers: (1) Deciding between automated vs manual emulation approaches, (2) QEMU user-mode emulation for individual binaries, (3) QEMU system-mode emulation for full firmware stack, (4) Advanced GDB debugging with gdb-multiarch, (5) Network traffic capture and protocol analysis, (6) MITM attacks and traffic manipulation, (7) Automated emulation with Firmadyne/FirmAE, (8) Troubleshooting boot failures and network issues. Requires extracted firmware (use firmware-extraction skill first). Complements firmware-static-analysis skill with runtime behavior observation."
 ---
 
 # Firmware Dynamic Analysis & Emulation
@@ -26,12 +26,19 @@ Before starting emulation, determine the best approach:
 - Full system emulation is overkill
 
 **Use SYSTEM-MODE (qemu-system)** when:
-- Need authentic complete environment
+- Need a guest kernel and modeled device environment
 - Analyzing kernel-level behavior
-- Require hardware emulation (GPIO, MTD, etc.)
+- Require hardware supported by a specific QEMU board model (GPIO/MTD are not generic substitutes)
 - Automated tools failed
 - Advanced debugging of boot process needed
 - Custom firmware with non-standard init
+
+Examples with `sudo`, TAP/iptables or chroot assume a disposable Linux analysis
+VM. Chroot and QEMU user-mode are not security boundaries and share the host
+kernel/network. Keep debugger listeners inside that VM; QEMU's GDB stub has no
+authentication. `-L` supplies an interpreter prefix, not an isolated rootfs.
+Interactive foreign shells need suitable binfmt_misc registration for subsequent
+`execve` calls, or each foreign executable must be launched through QEMU.
 
 ## Prerequisites
 
@@ -52,7 +59,8 @@ sudo apt-get install squashfs-tools mtd-utils
 
 # Optional but recommended
 pip3 install python-magic scapy
-sudo apt-get install binwalk
+# See firmware-extraction for standalone Binwalk 3.1.0; automated frameworks
+# may instead require the legacy Python Binwalk API in a separate environment.
 
 # For Firmadyne/FirmAE
 sudo apt-get install postgresql python3-psycopg2
@@ -88,7 +96,7 @@ Follow this systematic approach for firmware emulation:
 
 ## Path 1: Automated Emulation (Quick Start)
 
-Try automated tools first - they handle 80% of common firmware.
+Try automated tools for supported Linux firmware; success depends on the corpus, architecture, kernel and hardware assumptions.
 
 ### Step 1: Prepare Firmware
 
@@ -142,8 +150,7 @@ ssh admin@192.168.0.1
 ### Step 4: Analyze Network Traffic
 
 ```bash
-# FirmAE captures traffic automatically
-# Check scratch/<IMAGE_ID>/ for pcap files
+# Check scratch/<IMAGE_ID>/ for logs; capture explicitly if a pcap is needed.
 
 # Or capture live
 sudo tcpdump -i tap1_0 -w analysis.pcap
@@ -157,7 +164,7 @@ wireshark analysis.pcap
 If FirmAE/Firmadyne doesn't boot the firmware:
 
 1. Check console output for errors
-2. Try manual architecture specification: `./run.sh -a arm firmware.bin`
+2. Inspect FirmAE's architecture-detection script and its detected architecture; `run.sh -a` means analysis, not architecture selection
 3. Review `/path/to/FirmAE/scratch/<ID>/` for logs
 4. **Proceed to Path 2** (Manual Emulation)
 
@@ -203,7 +210,7 @@ find /mnt/firmware -name "*httpd*"
 # Run with arguments
 sudo chroot /mnt/firmware /usr/bin/qemu-arm-static /usr/sbin/httpd -f -p 8080
 
-# -f: foreground (don't daemonize)
+# For BusyBox httpd, -f means foreground; flags differ between servers.
 # -p 8080: port 8080
 
 # Access from host
@@ -227,7 +234,7 @@ gdb-multiarch /mnt/firmware/usr/sbin/httpd
 
 ## Path 3: Manual System-Mode Emulation
 
-Full firmware stack emulation - most authentic but complex.
+System emulation requires a kernel, DTB and rootfs compatible with the selected board. Matching CPU architecture alone is insufficient; vendor kernels commonly need unavailable SoC peripherals.
 
 ### Step 1: Identify Components
 
@@ -248,7 +255,7 @@ dd if=/dev/zero of=rootfs.ext4 bs=1M count=256
 mkfs.ext4 rootfs.ext4
 mkdir /tmp/mnt
 sudo mount -o loop rootfs.ext4 /tmp/mnt
-sudo cp -a squashfs-root/* /tmp/mnt/
+sudo cp -a squashfs-root/. /tmp/mnt/
 sudo umount /tmp/mnt
 ```
 
@@ -259,7 +266,7 @@ sudo umount /tmp/mnt
 qemu-system-arm -M help
 
 # Common choices:
-# ARM: versatilepb (most compatible), vexpress-a9
+# ARM: versatilepb (requires a compatible kernel/DTB), vexpress-a9
 # MIPS: malta
 # AArch64: virt
 # x86: pc (default)
@@ -341,7 +348,7 @@ route add default gw 192.168.100.1
 
 **Wrong machine type:**
 ```bash
-# Try more generic/compatible machines
+# Select only a board supported by the supplied kernel/DTB
 -M versatilepb  # Instead of device-specific
 -M virt         # Generic virtual machine
 ```
@@ -358,7 +365,7 @@ qemu-system-arm \
   -M versatilepb \
   -kernel zImage \
   ... \
-  -gdb tcp::1234 -S
+  -gdb tcp:127.0.0.1:1234 -S
   # -S: Pause at startup
 
 # Connect GDB
@@ -389,12 +396,19 @@ backtrace
 
 ### Userspace Debugging
 
-```gdb
-# After kernel boots and reaches userspace
-# Load userspace binary symbols
-add-symbol-file /path/to/binary 0x00008000
+Run a target-architecture `gdbserver` inside the guest for process-aware debugging;
+the system QEMU stub exposes CPUs and does not automatically track processes.
+Use a separate guest port and connect over the isolated emulation network:
 
-# Break in userspace application
+```bash
+# Inside guest
+gdbserver :2345 /usr/sbin/httpd -f
+# On host
+gdb-multiarch ./rootfs/usr/sbin/httpd
+```
+
+```gdb
+target remote 192.168.100.2:2345
 break main
 continue
 
@@ -426,6 +440,7 @@ watch variable if variable > 100
 ```bash
 # Start capture before booting firmware
 sudo tcpdump -i tap0 -w capture.pcap &
+CAPTURE_PID=$!
 
 # Boot firmware
 qemu-system-arm ...
@@ -434,7 +449,7 @@ qemu-system-arm ...
 # Traffic is being captured
 
 # Stop capture
-sudo killall tcpdump
+sudo kill -INT "$CAPTURE_PID"
 ```
 
 ### Analyze with Wireshark
@@ -455,7 +470,7 @@ tshark -r capture.pcap -Y "tcp.port == 23"  # Telnet
 tshark -r capture.pcap -Y "http.request.method == POST" -T fields -e http.file_data
 
 # Telnet passwords (cleartext)
-tshark -r capture.pcap -Y "telnet" -T fields -e data.text | grep -i password
+tshark -r capture.pcap -q -z follow,tcp,ascii,0  # Select the Telnet tcp.stream index
 
 # FTP credentials
 tshark -r capture.pcap -Y "ftp.request.command == USER || ftp.request.command == PASS"
@@ -465,7 +480,7 @@ tshark -r capture.pcap -Y "ftp.request.command == USER || ftp.request.command ==
 
 ```bash
 # Install mitmproxy
-pip3 install mitmproxy
+pipx install mitmproxy
 
 # Start transparent proxy
 sudo mitmproxy --mode transparent --showhost
@@ -474,7 +489,8 @@ sudo mitmproxy --mode transparent --showhost
 sudo iptables -t nat -A PREROUTING -i tap0 -p tcp --dport 80 -j REDIRECT --to-port 8080
 sudo iptables -t nat -A PREROUTING -i tap0 -p tcp --dport 443 -j REDIRECT --to-port 8080
 
-# Firmware HTTP/HTTPS traffic now goes through mitmproxy
+# HTTPS decryption also requires the guest to trust the proxy CA and no
+# unhandled certificate pinning. Record any trust-store changes in the report.
 # View and modify in real-time
 ```
 
@@ -506,9 +522,10 @@ curl "http://192.168.100.2/cgi-bin/test.cgi?cmd=;ls"
 
 ```bash
 # With AFL++ in QEMU mode
-export AFL_QEMU_CPU=cortex-a9
+export QEMU_LD_PREFIX="$PWD/rootfs"
+# Build AFL++ QEMU instrumentation for the target architecture first.
 afl-fuzz -Q -i input_dir -o output_dir -- \
-  qemu-arm -L ./rootfs/ ./rootfs/usr/bin/target @@
+  ./rootfs/usr/bin/target @@
 
 # Custom fuzzer for network service
 for i in {1..1000}; do
@@ -541,7 +558,7 @@ python3 exploit.py 192.168.100.2
 
 **Solutions**:
 1. Verify architecture matches: `file vmlinux` vs `qemu-system-XXX`
-2. Try different machine types: `-M help` to list options
+2. Check a board model that matches the kernel/DTB: `-M help` lists options
 3. Adjust kernel command line: Different console, root device
 4. Use `-append "debug loglevel=8"` for more output
 5. Try `-append "init=/bin/sh"` to bypass normal init
@@ -563,7 +580,7 @@ python3 exploit.py 192.168.100.2
 **Symptom**: `Connection refused` or `Remote 'g' packet reply is too long`
 
 **Solutions**:
-1. Ensure QEMU started with `-gdb tcp::1234`
+1. Ensure QEMU started with `-gdb tcp:127.0.0.1:1234`
 2. Use `gdb-multiarch` not regular `gdb`
 3. Set architecture in GDB: `set architecture arm`
 4. Load correct binary: `file vmlinux` before connecting
@@ -583,7 +600,7 @@ python3 exploit.py 192.168.100.2
 **Symptom**: Daemon fails to start or exits immediately
 
 **Solutions**:
-1. Run in foreground with `-f` flag
+1. Check this server's usage for its foreground flag (`-f` for BusyBox httpd)
 2. Check for missing /dev nodes
 3. Verify permissions
 4. Look at error messages with `strace`
@@ -622,7 +639,7 @@ objdump -d httpd
 
 # 1. Extract
 binwalk -e firmware.bin
-cd _firmware.bin.extracted/squashfs-root/
+cd /path/to/extracted/rootfs/  # Use the actual extraction output path
 
 # 2. Quick automated emulation attempt
 cd /path/to/FirmAE
@@ -633,16 +650,17 @@ qemu-system-arm -M versatilepb -kernel zImage ...
 
 # 4. Capture network traffic
 sudo tcpdump -i tap0 -w capture.pcap &
+CAPTURE_PID=$!
 
 # 5. Identify services
 nmap -p- -A 192.168.100.2
 
 # 6. Static analysis of key binaries
-readelf -Ws /usr/sbin/httpd
+readelf --dyn-syms --wide ./rootfs/usr/sbin/httpd
 
 # 7. Debug specific binary
-qemu-arm -g 1234 -L ./rootfs/ /usr/sbin/httpd
-gdb-multiarch /usr/sbin/httpd
+qemu-arm -g 1234 -L ./rootfs/ ./rootfs/usr/sbin/httpd
+gdb-multiarch ./rootfs/usr/sbin/httpd
 (gdb) target remote :1234
 
 # 8. Test for vulnerabilities
@@ -686,7 +704,7 @@ sqlmap -u "http://192.168.100.2/login.php"
 
 Record emulation setup and findings:
 
-```markdown
+````markdown
 # Firmware Emulation Report
 
 **Firmware**: [filename]
@@ -745,7 +763,7 @@ Record emulation setup and findings:
 1. [Further testing needed]
 2. [Exploit development targets]
 3. [Code review recommendations]
-```
+````
 
 ## Additional References
 

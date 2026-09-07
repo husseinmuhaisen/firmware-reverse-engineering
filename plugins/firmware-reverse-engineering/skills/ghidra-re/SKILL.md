@@ -1,6 +1,6 @@
 ---
 name: ghidra-re
-description: "Expert-level Ghidra reverse engineering for firmware binaries with emphasis on stripped binary analysis, automated function discovery, cryptographic routine identification, authentication logic detection, and vulnerability hunting. Use when Claude needs to perform deep static analysis of firmware binaries in Ghidra. Covers: (1) Stripped binary analysis techniques (function discovery via prologues, xrefs, string tracing), (2) Type recovery and structure reconstruction, (3) Automated analysis via Python scripting (Ghidra API), (4) Cryptographic function identification (AES, MD5, SHA constants), (5) Authentication and authorization function discovery, (6) Vulnerability detection (buffer overflows, format strings, command injection, taint analysis), (7) Decompiler enhancement and custom type propagation, (8) Integration with emulation workflow. Assumes expert RE knowledge. Complements firmware-static-analysis (basic recon) and firmware-emulation (dynamic analysis)."
+description: "Expert-level Ghidra reverse engineering for firmware binaries with emphasis on stripped binary analysis, automated function discovery, cryptographic routine identification, authentication logic detection, and vulnerability hunting. Use when the agent needs to perform deep static analysis of firmware binaries in Ghidra. Covers: (1) Stripped binary analysis techniques (function discovery via prologues, xrefs, string tracing), (2) Type recovery and structure reconstruction, (3) Automated analysis via Python scripting (Ghidra API), (4) Cryptographic function identification (AES, MD5, SHA constants), (5) Authentication and authorization function discovery, (6) Vulnerability detection (buffer overflows, format strings, command injection, manual data-flow verification), (7) Decompiler enhancement and custom type propagation, (8) Integration with emulation workflow. Assumes expert RE knowledge. Complements firmware-static-analysis (basic recon) and firmware-emulation (dynamic analysis)."
 ---
 
 # Ghidra Reverse Engineering for Firmware
@@ -18,7 +18,8 @@ Expert-level Ghidra workflows for analyzing stripped firmware binaries, with aut
 - Custom script development
 
 **Prerequisites:**
-- Ghidra installed (ghidraRun available)
+- Ghidra 12.1.3 with its bundled **Jython extension** installed (File → Install Extensions → Jython, then restart). Scripts explicitly select `# @runtime Jython`; they do not run in a standalone Python interpreter.
+- JDK required by the installed Ghidra release (JDK 21 for 12.1.3)
 - Python scripting knowledge
 - Understanding of assembly (ARM/MIPS/x86)
 - Binary already extracted (use firmware-extraction skill)
@@ -27,20 +28,33 @@ Expert-level Ghidra workflows for analyzing stripped firmware binaries, with aut
 - After: firmware-extraction, firmware-static-analysis (initial recon)
 - Before/During: firmware-emulation (validate findings dynamically)
 
+The four bundled scripts produce review candidates, not confirmed vulnerabilities. They
+inspect recovered instructions and resolved references; indirect calls, inlined code and
+unrecovered data may be missed. They preserve existing names and comments; candidate
+renames apply only to default symbols. Save the project before running analysis scripts.
+
+Set these paths for the headless examples (replace with absolute local paths):
+
+```bash
+export GHIDRA_INSTALL_DIR=/path/to/ghidra_12.1.3_PUBLIC
+export GHIDRA_SCRIPT_DIR=/path/to/ghidra-re/scripts
+mkdir -p /projects
+```
+
 ## Analysis Workflow
 
 ### 1. Project Setup
 
 ```bash
 # Create project
-ghidraRun
+"$GHIDRA_INSTALL_DIR/ghidraRun"
 
 # Or headless for automation
-analyzeHeadless /projects FirmwareProject -import /path/to/binary.elf
+"$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /projects FirmwareProject -scriptPath "$GHIDRA_SCRIPT_DIR" -import /path/to/binary.elf
 
 # Batch import
 for bin in extracted/bin/*; do
-    analyzeHeadless /projects Firmware -import "$bin"
+    "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /projects Firmware -scriptPath "$GHIDRA_SCRIPT_DIR" -import "$bin"
 done
 ```
 
@@ -49,7 +63,7 @@ done
 **Automated approach:**
 ```bash
 # Run analysis scripts in sequence
-analyzeHeadless /projects Firmware -process binary.elf \
+"$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /projects Firmware -scriptPath "$GHIDRA_SCRIPT_DIR" -process binary.elf \
   -postScript find_crypto.py \
   -postScript find_auth_functions.py \
   -postScript find_buffer_overflows.py
@@ -76,8 +90,8 @@ Choose analysis path based on goal:
 
 **Authentication Analysis** → Use `scripts/find_auth_functions.py`
 - Identifies strcmp, password string refs, multi-return patterns
-- Ranks by confidence score
-- Auto-renames high-confidence functions
+- Ranks by heuristic score (not a probability)
+- Adds candidate names to highly ranked default symbols
 
 **Crypto Analysis** → Use `scripts/find_crypto.py`
 - Searches for AES S-boxes, MD5/SHA constants
@@ -86,8 +100,8 @@ Choose analysis path based on goal:
 
 **Vulnerability Hunting** → Use `scripts/find_buffer_overflows.py`
 - Detects dangerous function calls (strcpy, sprintf, gets)
-- Traces taint flow from untrusted sources to sinks
-- Identifies stack buffers with risky operations
+- Flags source/sink co-occurrence within a function; does not trace taint
+- Lists large recovered stack objects in functions with risky API calls
 
 **Network Protocol Analysis**
 - Find socket/recv/send calls
@@ -99,12 +113,20 @@ Choose analysis path based on goal:
 For each interesting function:
 
 ```python
+# @runtime Jython
 # Decompile and enhance
 func = getFunctionAt(toAddr("0x00401000"))
 
 # Set signature (if known)
 sig = "int verify_password(char *user_input, char *stored_hash)"
-ApplyFunctionSignatureCmd(func.getEntryPoint(), sig, SourceType.USER_DEFINED)
+from ghidra.app.cmd.function import ApplyFunctionSignatureCmd
+from ghidra.app.util.parser import FunctionSignatureParser
+from ghidra.program.model.symbol import SourceType
+from ghidra.program.model.listing import Function, ParameterImpl
+from ghidra.program.model.data import *
+assert func is not None, "Select a valid function entry"
+definition = FunctionSignatureParser(currentProgram.getDataTypeManager(), None).parse(func.getSignature(), sig)
+assert ApplyFunctionSignatureCmd(func.getEntryPoint(), definition, SourceType.USER_DEFINED).applyTo(currentProgram)
 
 # Define structures
 dtm = currentProgram.getDataTypeManager()
@@ -116,13 +138,14 @@ dtm.addDataType(struct, DataTypeConflictHandler.REPLACE_HANDLER)
 
 # Apply to function parameters
 param = ParameterImpl("request", PointerDataType(struct), currentProgram)
-func.replaceParameters([param], Function.FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS, True, SourceType.USER_DEFINED)
+func.replaceParameters(Function.FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS, True, SourceType.USER_DEFINED, param)
 ```
 
 ### 5. Vulnerability Analysis
 
 **Buffer Overflow Detection:**
 ```python
+# @runtime Jython
 # Manual verification after script identifies candidates
 # 1. Check buffer size
 # 2. Trace input length
@@ -133,20 +156,24 @@ func.replaceParameters([param], Function.FunctionUpdateType.DYNAMIC_STORAGE_ALL_
 # Decompiler shows:
 #   strcpy(local_buffer, user_input);
 # Check local_buffer size in stack frame
-# If user_input unbounded → exploitable
+# Verify attacker-controlled length exceeds the destination and reaches this call.
+# A write beyond the buffer is a vulnerability; code execution needs separate evidence.
 ```
 
 **Format String Bugs:**
 ```python
+# @runtime Jython
 # Find printf(user_controlled_string)
 # Script pattern:
 if "printf" in called_functions:
     # Check if format arg is from user input
-    # Decompiler will show if first arg is variable vs constant
+    # A variable format is not necessarily attacker-controlled; trace its origin.
+    pass  # Manual review, not a complete detector
 ```
 
 **Command Injection:**
 ```python
+# @runtime Jython
 # Find system/popen with user data
 # Pattern: system(cmd) where cmd contains user input
 # Look for string concatenation before system() call
@@ -156,15 +183,17 @@ if "printf" in called_functions:
 
 **Automated structure inference:**
 ```python
-# See references/stripped-analysis.md for full script
+# @runtime Jython
+# See references/stripped-analysis.md for a sketch, not a complete inference engine
 # Analyzes memory access patterns:
 # - *(ptr + 0) → field at offset 0
 # - *(ptr + 4) → field at offset 4
-# Auto-generates structure definition
+# Define the structure manually after verifying offsets and field sizes
 ```
 
 **Manual structure definition:**
 ```python
+# @runtime Jython
 # From decompiler output showing member accesses
 struct = StructureDataType("device_state", 0)
 struct.add(DWordDataType(), "magic", None)          # offset 0
@@ -182,37 +211,40 @@ Right-click function → References → Show References to
 
 **Find call sites:**
 ```python
+# @runtime Jython
 func = getFunctionAt(currentAddress)
 refs = getReferencesTo(func.getEntryPoint())
 for ref in refs:
     if ref.getReferenceType().isCall():
         caller = getFunctionContaining(ref.getFromAddress())
-        print("Called from: {}".format(caller.getName()))
+        if caller:
+            print("Called from: {}".format(caller.getName()))
 ```
 
 **Trace data flow:**
 ```python
+# @runtime Jython
 # From source to sink
 # 1. Find all calls to source (e.g., recv)
 # 2. Track where data goes
 # 3. Check if reaches sink (e.g., system)
-# See scripts/find_buffer_overflows.py for taint analysis
+# See scripts/find_buffer_overflows.py for manual data-flow verification
 ```
 
 ## Provided Scripts
 
-All scripts in `scripts/` directory, ready to use:
+All scripts in `scripts/` run in Ghidra with the Jython runtime above:
 
 ### find_crypto.py
-Identifies cryptographic functions by searching for known constants:
-- AES S-boxes
-- MD5, SHA256 round constants
+Finds candidate constant prefixes and their direct references; absence is not evidence that crypto is absent:
+- First 16 bytes of the AES S-box
+- First four MD5 / SHA256 constants in either byte order
 - Auto-labels crypto tables
 - Finds functions referencing crypto data
 
 **Usage:**
 ```bash
-analyzeHeadless /projects Project -process binary -postScript find_crypto.py
+"$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /projects Project -scriptPath "$GHIDRA_SCRIPT_DIR" -process binary -postScript find_crypto.py
 ```
 
 ### find_auth_functions.py
@@ -224,19 +256,19 @@ Discovers authentication logic via heuristics:
 
 **Usage:**
 ```bash
-analyzeHeadless /projects Project -process binary -postScript find_auth_functions.py
+"$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /projects Project -scriptPath "$GHIDRA_SCRIPT_DIR" -process binary -postScript find_auth_functions.py
 ```
 
 ### find_buffer_overflows.py
 Detects potential buffer overflow vulnerabilities:
 - Dangerous function calls (strcpy, sprintf, gets)
-- Taint flow analysis (untrusted input to dangerous sink)
+- Source/sink co-occurrence (data flow unverified)
 - Stack buffer identification
-- Auto-comments vulnerable locations
+- Appends review notes at candidate locations without deleting analyst comments
 
 **Usage:**
 ```bash
-analyzeHeadless /projects Project -process binary -postScript find_buffer_overflows.py
+"$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /projects Project -scriptPath "$GHIDRA_SCRIPT_DIR" -process binary -postScript find_buffer_overflows.py
 ```
 
 ## Scripting Patterns
@@ -244,6 +276,7 @@ analyzeHeadless /projects Project -process binary -postScript find_buffer_overfl
 ### Template Script
 
 ```python
+# @runtime Jython
 # my_analysis.py
 # Description: Custom analysis for firmware
 
@@ -263,6 +296,7 @@ for func in fm.getFunctions(True):
 ### Common Operations
 
 ```python
+# @runtime Jython
 # Navigate
 addr = toAddr("0x00400000")
 func = getFunctionAt(addr)
@@ -298,6 +332,7 @@ high_func = results.getHighFunction()
 
 **Method 1: Prologue Scanning**
 ```python
+# @runtime Jython
 # ARM: push {r11, lr} = 0xe92d4800
 # MIPS: addiu sp,sp,-XX
 # x86: push ebp; mov ebp,esp
@@ -308,6 +343,7 @@ high_func = results.getHighFunction()
 
 **Method 2: Cross-Reference Analysis**
 ```python
+# @runtime Jython
 # Find all call instructions
 # Target addresses likely are function starts
 # See references/stripped-analysis.md
@@ -315,6 +351,7 @@ high_func = results.getHighFunction()
 
 **Method 3: String References**
 ```python
+# @runtime Jython
 # Functions that reference strings
 # Use string content to infer function purpose
 # See references/stripped-analysis.md
@@ -323,6 +360,7 @@ high_func = results.getHighFunction()
 ### Automatic Renaming Heuristics
 
 ```python
+# @runtime Jython
 # Pattern-based naming
 def infer_name(func):
     strings = get_function_strings(func)
@@ -356,10 +394,12 @@ def infer_name(func):
 
 **Example:**
 ```python
+# @runtime Jython
 # In Ghidra: Find auth function
 auth_func = getFunctionAt(toAddr("0x00401234"))
 
-# Note address: 0x00401234
+# Note address: 0x00401234. For PIE/shared objects, translate using the actual
+# runtime load bias; do not use a static address unchanged.
 
 # In QEMU with GDB:
 # gdb-multiarch binary
@@ -378,7 +418,7 @@ auth_func = getFunctionAt(toAddr("0x00401234"))
 2. **Name Incrementally** - Don't try to name everything at once
 3. **Trust Decompiler, Verify Assembly** - Decompiler is good but not perfect
 4. **Document Assumptions** - Use comments liberally
-5. **Version Control** - Use File → Add to Version Control
+5. **Version Control** - Use a shared Ghidra Server project for program versioning; use Git for exported scripts and notes
 6. **Cross-Reference Constantly** - Understand call graphs
 7. **Type Everything** - Proper types improve decompilation dramatically
 8. **Script Repetitive Tasks** - Don't do the same thing 100 times manually
@@ -422,18 +462,20 @@ T                Set data type
 
 ```bash
 # Headless analysis with scripts
-analyzeHeadless /projects Firmware -import binary.elf \
+"$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /projects Firmware -scriptPath "$GHIDRA_SCRIPT_DIR" -import binary.elf \
   -postScript find_crypto.py -postScript find_auth_functions.py
 
 # Import without auto-analysis (manual control)
-analyzeHeadless /projects Firmware -import binary.elf -noanalysis
+"$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /projects Firmware -scriptPath "$GHIDRA_SCRIPT_DIR" -import binary.elf -noanalysis
 
-# Export analysis results
-analyzeHeadless /projects Firmware -process binary.elf \
+# Export analysis results (first save the JSON example in references/workflow.md
+# as export_results.py in GHIDRA_SCRIPT_DIR; it is not a bundled script)
+"$GHIDRA_INSTALL_DIR/support/analyzeHeadless" /projects Firmware -scriptPath "$GHIDRA_SCRIPT_DIR" -process binary.elf \
   -postScript export_results.py
 ```
 
 ```python
+# @runtime Jython
 # Essential Ghidra Python APIs
 currentProgram                              # Program object
 getFunctionAt(addr)                         # Get function

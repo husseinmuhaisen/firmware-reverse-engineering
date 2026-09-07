@@ -21,11 +21,15 @@ class PackagingTests(unittest.TestCase):
         shutil.copytree(ROOT, self.root, ignore=shutil.ignore_patterns(".git", ".venv", "__pycache__"))
         self.skills = self.root / "plugins/firmware-reverse-engineering/skills"
 
-    def test_preserved_checkout_and_visible_blockers(self):
+    def test_approved_checkout_has_no_release_blockers(self):
         errors, blockers = validator.validate(self.root)
         self.assertEqual(errors, [])
-        self.assertTrue(any("auto_rename.py" in issue for issue in blockers))
-        self.assertTrue(any("LICENSE" in issue for issue in blockers))
+        self.assertEqual(blockers, [])
+
+    def test_missing_plugin_license_blocks_release(self):
+        (self.root / "plugins/firmware-reverse-engineering/LICENSE").unlink()
+        _, blockers = validator.validate(self.root)
+        self.assertTrue(any("Missing LICENSE" in issue for issue in blockers))
 
     def test_skill_edit_is_rejected(self):
         path = self.skills / "firmware-extraction/SKILL.md"
@@ -36,11 +40,11 @@ class PackagingTests(unittest.TestCase):
     def test_dropped_resource_is_rejected(self):
         (self.skills / "firmware-static-analysis/references/architectures.md").unlink()
         errors, blockers = validator.validate(self.root)
-        self.assertTrue(any("Original skill file missing" in issue for issue in errors))
+        self.assertTrue(any("Approved skill file missing" in issue for issue in errors))
         self.assertTrue(any("architectures.md" in issue for issue in blockers))
 
     def test_unapproved_new_script_is_rejected(self):
-        (self.skills / "ghidra-re/scripts/auto_rename.py").write_text("pass\n")
+        (self.skills / "ghidra-re/scripts/unapproved_script.py").write_text("pass\n")
         errors, _ = validator.validate(self.root)
         self.assertTrue(any("added without a baseline" in issue for issue in errors))
 
