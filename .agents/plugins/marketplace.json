@@ -1,0 +1,20 @@
+{
+  "name": "firmware-reverse-engineering",
+  "interface": {
+    "displayName": "Firmware Reverse Engineering"
+  },
+  "plugins": [
+    {
+      "name": "firmware-reverse-engineering",
+      "source": {
+        "source": "local",
+        "path": "./plugins/firmware-reverse-engineering"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Security"
+    }
+  ]
+}

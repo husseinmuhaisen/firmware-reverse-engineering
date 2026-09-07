@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.DS_Store
+.pytest_cache/
+.env
+.env.*
+!.env.example

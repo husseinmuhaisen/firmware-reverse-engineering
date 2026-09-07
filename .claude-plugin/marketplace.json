@@ -1,0 +1,17 @@
+{
+  "name": "firmware-reverse-engineering",
+  "owner": {
+    "name": "Hussein Muhaisen",
+    "url": "https://github.com/husseinmuhaisen"
+  },
+  "metadata": {
+    "description": "Firmware extraction, static analysis, Ghidra reverse engineering, emulation, and security reporting skills."
+  },
+  "plugins": [
+    {
+      "name": "firmware-reverse-engineering",
+      "source": "./plugins/firmware-reverse-engineering",
+      "description": "Firmware extraction, static analysis, Ghidra reverse engineering, emulation, and security reporting skills."
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+name: Validate release
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python tools/validate_repo.py --release
+      - run: python -m unittest discover -s tests -v
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - name: Install pinned packaging tools
+        run: npm install --global @anthropic-ai/claude-code@2.1.263 @openai/codex@0.153.4 skills@1.5.24
+      - name: Validate with Claude Code
+        run: |
+          claude plugin validate . --strict
+          claude plugin validate ./plugins/firmware-reverse-engineering --strict
+      - name: Check Codex discovery without model calls
+        run: python tools/check_codex_discovery.py
+      - name: Check standalone skill discovery
+        run: skills add . --list
+
+  ghidra:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Download pinned Ghidra and install its bundled Jython extension
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 -o "$RUNNER_TEMP/ghidra.zip" https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.3_build/ghidra_12.1.3_PUBLIC_20260817.zip
+          echo "93a5d11a9ad510622acaaf908c556a7b9b764d338e78a7567f3689bf5081fd54  $RUNNER_TEMP/ghidra.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/ghidra.zip" -d "$RUNNER_TEMP"
+          unzip -q "$RUNNER_TEMP/ghidra_12.1.3_PUBLIC/Extensions/Ghidra/ghidra_12.1.3_PUBLIC_20260817_Jython.zip" -d "$RUNNER_TEMP/ghidra_12.1.3_PUBLIC/Ghidra/Extensions"
+      - name: Exercise Ghidra scripts on a benign compiled fixture
+        run: python3 tools/check_ghidra_runtime.py --ghidra-home "$RUNNER_TEMP/ghidra_12.1.3_PUBLIC"
