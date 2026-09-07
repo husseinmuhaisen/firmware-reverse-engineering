@@ -6,11 +6,11 @@ Reviewed September 7, 2026. Original commit: `e47b88bc96f2e269f71acfc702c0699f65
 
 The initial packaging commit moved all 25 original skill files without byte
 changes. Hussein subsequently explicitly authorized the technical fixes and
-requested the license used by SpecterOps. This follow-up fixes concrete errors
-while retaining the five skills and their workflows. It adds Apache-2.0 (the
-SpecterOps repository's root license), matching plugin metadata and NOTICE files.
+Apache-2.0 licensing. The technical revision fixes concrete errors while
+retaining the five skills and their workflows. It adds Apache-2.0 with matching
+plugin metadata and NOTICE files.
 The content baseline now records the approved revised files and missing script.
-No default-branch merge, visibility change or release publication was performed.
+The packaging and technical fixes were merged in [PR #1](https://github.com/OrbitCurve/firmware-reverse-engineering/pull/1) before the repository was transferred to OrbitCurve.
 
 ## Technical fixes
 
@@ -50,7 +50,6 @@ See [compatibility.md](compatibility.md#runtime-checks) for commands. CI runs th
 lightweight regressions and a checksum-pinned Ghidra integration test. Binwalk's
 runtime test is separately runnable with 3.1.0 installed.
 
-- [SpecterOps root license](https://github.com/SpecterOps/skills/blob/main/LICENSE)
 - [Binwalk 3.1.0 CLI](https://github.com/ReFirmLabs/binwalk/blob/v3.1.0/src/cliparser.rs) and [entropy implementation](https://github.com/ReFirmLabs/binwalk/blob/v3.1.0/src/entropy.rs). The development branch has different flags; `-C` is valid in 3.1.0.
 - [Ghidra 12.1.3 release](https://github.com/NationalSecurityAgency/ghidra/releases/tag/Ghidra_12.1.3_build); bundled API documentation and Jython extension examples were used for runtime corrections.
 - [FirmAE mode parser](https://github.com/pr0v3rbs/FirmAE/blob/master/run.sh) and [Firmadyne workflow](https://github.com/firmadyne/firmadyne#usage)

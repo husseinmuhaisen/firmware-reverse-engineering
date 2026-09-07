@@ -134,5 +134,4 @@ Packaging was checked against these sources on September 7, 2026:
 - [OpenAI skills documentation](https://learn.chatgpt.com/docs/build-skills)
 - [OpenAI plugins documentation](https://learn.chatgpt.com/docs/plugins)
 - [Trail of Bits skills](https://github.com/trailofbits/skills)
-- [SpecterOps skills](https://github.com/SpecterOps/skills)
 - [Vercel skills CLI](https://github.com/vercel-labs/skills)

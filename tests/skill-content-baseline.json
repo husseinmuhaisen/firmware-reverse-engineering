@@ -29,5 +29,5 @@
     "ghidra-re/scripts/find_buffer_overflows.py": "aa177460c81714afdccb0212d94c947fe0474e6b7d33eaf99f29b18719b49ce3",
     "ghidra-re/scripts/find_crypto.py": "272e5454d721902805b2ac90889223e32f17ca743beb30cb17c0285577693317"
   },
-  "approval": "Technical corrections and SpecterOps license choice explicitly authorized by Hussein Muhaisen on 2026-09-07; see docs/release-readiness.md."
+  "approval": "Technical corrections and Apache-2.0 licensing explicitly authorized by Hussein Muhaisen on 2026-09-07; see docs/release-readiness.md."
 }

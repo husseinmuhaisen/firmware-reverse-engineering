@@ -1,6 +1,6 @@
 # Firmware Reverse Engineering Skills
 
-Five agent skills for firmware extraction, static analysis, Ghidra reverse engineering, emulation, and security reporting, by [Hussein Muhaisen](https://github.com/husseinmuhaisen).
+Five agent skills from [OrbitCurve](https://github.com/OrbitCurve) for firmware extraction, static analysis, Ghidra reverse engineering, emulation, and security reporting, by [Hussein Muhaisen](https://github.com/husseinmuhaisen).
 
 The collection packages the existing workflows, references, templates, and Ghidra scripts for Claude Code and Codex. Installing it makes the instructions available to your agent; install the analysis tools separately.
 
@@ -18,14 +18,14 @@ The collection packages the existing workflows, references, templates, and Ghidr
 
 ## Install
 
-These commands apply once the packaging changes are merged into the default branch. To test an unmerged checkout, see [local testing](docs/compatibility.md#local-testing).
+To test a local checkout, see [local testing](docs/compatibility.md#local-testing).
 
 ### Claude Code
 
 In Claude Code:
 
 ```text
-/plugin marketplace add husseinmuhaisen/firmware-reverse-engineering
+/plugin marketplace add OrbitCurve/firmware-reverse-engineering
 /plugin install firmware-reverse-engineering@firmware-reverse-engineering
 ```
 
@@ -42,7 +42,7 @@ Then provide the binary path and your analysis goal. The agent can also select s
 In your terminal:
 
 ```sh
-codex plugin marketplace add husseinmuhaisen/firmware-reverse-engineering
+codex plugin marketplace add OrbitCurve/firmware-reverse-engineering
 codex plugin add firmware-reverse-engineering@firmware-reverse-engineering
 ```
 
@@ -57,8 +57,8 @@ $firmware-reverse-engineering:firmware-static-analysis Inspect ./samples/busybox
 For agents supported by the [skills CLI](https://github.com/vercel-labs/skills), list the available skills, then select your agent interactively:
 
 ```sh
-npx skills add husseinmuhaisen/firmware-reverse-engineering --list
-npx skills add husseinmuhaisen/firmware-reverse-engineering
+npx skills add OrbitCurve/firmware-reverse-engineering --list
+npx skills add OrbitCurve/firmware-reverse-engineering
 ```
 
 This installs skill directories rather than a full plugin. Keep each directory's `references/`, `assets/`, and `scripts/` beside its `SKILL.md`. Avoid installing the same collection through both routes in the same agent.
@@ -84,4 +84,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Changes to skill instructions, reference
 
 ## License
 
-Licensed under the [Apache License 2.0](LICENSE), matching the root license used by [SpecterOps/skills](https://github.com/SpecterOps/skills/blob/main/LICENSE). See [NOTICE](NOTICE) for attribution.
+Licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
